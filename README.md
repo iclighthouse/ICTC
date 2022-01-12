@@ -8,13 +8,13 @@ IC Transaction Coordinator (ICTC) is a distributed transaction framework for Def
 
 Developing dapps based on IC networks, especially Defi applications, we have to face the problem of atomicity, which is essentially a data consistency problem for distributed transactions. The biggest challenge facing distributed transactions on blockchain networks compared to traditional distributed transactions is the different assumption of trust in the participating entities. While traditional distributed transactions are based on trustworthiness assumptions for participating entities, distributed transactions on blockchain networks are based on untrustworthiness assumptions for participating entities, and it only trusts smart contract code. 
 
-When a method in Canister needs to execute a cross-container call, it will face the threat of inconsistent data due to a fault in the callee. Four types of faults may occur.
+When a method in Canister needs to execute a cross-container call, it will face the threat of inconsistent data due to a fault in the callee. Three types of faults may occur.
 
 - Business error: e.g. insufficient token balance.
 - Runtime error: e.g. divide-by-0 error.
 - Fail-stop: e.g. the subnet where the callee is located is inaccessible.
 
-The IC network is free from fail-transient and fail-stop most of the time, but there is still the potential for both types of failures to occur. If the Defi application cannot robustly handle failures and maintain eventual consistency, the consequences could be catastrophic. Imagine the following scenario.
+The IC network is free from fail-stop most of the time, but there is still the potential for this type of failures to occur. If the Defi application cannot robustly handle failures and maintain eventual consistency, the consequences could be catastrophic. Imagine the following scenario.
 
     In a Dex canister, Alice, Bob exchange TokenA and TokenB, and the fee needs to be paid by Alice with TokenC, e.g.    
     TokenA.transferFrom(Alice, Bob, 100);  
