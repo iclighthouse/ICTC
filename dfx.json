@@ -1,0 +1,30 @@
+{
+  "canisters": {
+    "TokenA": {
+      "main": "./token/TokenA.mo",
+      "type": "motoko",
+      "args" : "--compacting-gc"
+    },
+    "TokenB": {
+      "main": "./token/TokenB.mo",
+      "type": "motoko",
+      "args" : "--compacting-gc"
+    },
+    "ICTCTest": {
+      "main": "./Test.mo",
+      "type": "motoko",
+      "args" : "--compacting-gc"
+    }
+    
+  },
+  "networks": {
+    "ic": {
+      "providers": ["https://ic0.app"],
+      "type": "persistent"
+    },
+    "local": {
+      "bind": "0.0.0.0:8000",
+      "type": "ephemeral"
+    }
+  }
+}
