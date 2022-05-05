@@ -10,8 +10,8 @@
       "type": "motoko",
       "args" : "--compacting-gc"
     },
-    "ICTCTest": {
-      "main": "./Test.mo",
+    "Example": {
+      "main": "./Example.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     }
