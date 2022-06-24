@@ -1,5 +1,5 @@
 /**
- * Module     : SagaTM.mo v0.1
+ * Module     : SagaTM.mo v0.2
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Saga Transaction Manager.
@@ -53,11 +53,13 @@ module {
         ttid: Ttid;
         task: Task;
         comp: ?Compensation; // for auto compensation
+        status: Status;
     };
     public type CompTask = {
         forTtid: Ttid;
         tcid: Tcid;
         comp: Compensation;
+        status: Status;
     };
     public type Order = {
         compStrategy: CompStrategy;
@@ -76,18 +78,22 @@ module {
         orders: [(Toid, Order)]; 
         aliveOrders: List.List<(Toid, Time.Time)>; 
         taskEvents: [(Toid, [Ttid])];
+        //taskCallback: [(Ttid, Callback)]; 
+        //orderCallback: [(Toid, OrderCallback)]; 
         actuator: SyncTA.Data; 
     };
 
-    public class SagaTM(this: Principal, localCall: LocalCall, taskCallback: ?Callback, orderCallback: ?OrderCallback) {
+    public class SagaTM(this: Principal, localCall: LocalCall, defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
         let limitAtOnce: Nat = 20;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
-        var orders = TrieMap.TrieMap<Toid, Order> (Nat.equal, Hash.hash);
+        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, Hash.hash);
         var aliveOrders = List.nil<(Toid, Time.Time)>();
-        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]> (Nat.equal, Hash.hash);
+        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, Hash.hash);
         var actuator_: ?SyncTA.SyncTA = null;
+        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, Hash.hash);
+        var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, Hash.hash);
         private func actuator() : SyncTA.SyncTA {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
@@ -114,12 +120,22 @@ module {
                 };
                 case(_){};
             };
-            // callback
-            switch(taskCallback){
-                case(?(_taskCallback)){
-                    await _taskCallback(_ttid, _task, _result);
+            // task status
+            ignore _setTaskStatus(toid, _ttid, _result.0);
+            // task callback
+            switch(taskCallback.get(_ttid)){
+                case(?(_taskCallback)){ 
+                    await _taskCallback(_ttid, _task, _result); 
+                    taskCallback.delete(_ttid);
                 };
-                case(_){};
+                case(_){
+                    switch(defaultTaskCallback){
+                        case(?(_taskCallback)){
+                            await _taskCallback(_ttid, _task, _result);
+                        };
+                        case(_){};
+                    };
+                };
             };
             // process
             if (orderStatus == #Compensating){ //Compensating
@@ -147,7 +163,7 @@ module {
             //taskEvents
             switch(taskEvents.get(toid)){
                 case(?(events)){
-                    taskEvents.put(toid, Array.append(events, [_ttid]));
+                    taskEvents.put(toid, SyncTA.arrayAppend(events, [_ttid]));
                 };
                 case(_){
                     taskEvents.put(toid, [_ttid]);
@@ -202,11 +218,11 @@ module {
             };
         };
 
-        private func _taskFromRequest(_toid: Toid, _task: PushTaskRequest) : SyncTA.Task{
+        private func _taskFromRequest(_toid: Toid, _task: PushTaskRequest, _autoAddLastTtid: Bool) : SyncTA.Task{
             var preTtid = _task.preTtid;
             let lastTtid = Option.get(_orderLastTid(_toid), 0);
-            if (Option.isNull(Array.find(preTtid, func (ttid:Ttid):Bool{ttid == lastTtid})) and lastTtid > 0){
-                preTtid := Array.append(preTtid, [lastTtid]);
+            if (_autoAddLastTtid and Option.isNull(Array.find(preTtid, func (ttid:Ttid):Bool{ttid == lastTtid})) and lastTtid > 0){
+                preTtid := SyncTA.arrayAppend(preTtid, [lastTtid]);
             };
             return {
                 callee = _task.callee; 
@@ -374,16 +390,25 @@ module {
             var callbackStatus : ?Status = null;
             switch(orders.get(_toid)){
                 case(?(order)){
-                    switch(orderCallback){
-                        case(?(_orderCallback)){
-                            try{ 
+                    try{ 
+                        switch(orderCallback.get(_toid)){
+                            case(?(_orderCallback)){ 
                                 await _orderCallback(_toid, _tatus, order.data); 
+                                orderCallback.delete(_toid);
                                 callbackStatus := ?#Done;
-                            } catch(e) {
-                                callbackStatus := ?#Error;
+                            };
+                            case(_){
+                                switch(defaultOrderCallback){
+                                    case(?(_orderCallback)){
+                                        await _orderCallback(_toid, _tatus, order.data); 
+                                        callbackStatus := ?#Done;
+                                    };
+                                    case(_){};
+                                };
                             };
                         };
-                        case(_){};
+                    } catch(e) {
+                        callbackStatus := ?#Error;
                     };
                     aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                 };
@@ -526,6 +551,7 @@ module {
                 forTtid = _ttid;
                 tcid = cid;
                 comp = task;
+                status = #Doing;
             };
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -598,6 +624,7 @@ module {
                                 ttid = t.ttid;
                                 task = t.task;
                                 comp = _comp;
+                                status = t.status;
                             };
                         } else { return t; };
                     });
@@ -617,9 +644,67 @@ module {
             };
             return res;
         };
+        private func _setTaskStatus(_toid: Toid, _ttid: Ttid, _status: Status) : Bool{
+            var res : Bool = false;
+            switch(orders.get(_toid)){
+                case(?(order)){
+                    var tasks = order.tasks;
+                    var comps = order.comps;
+                    tasks := List.map(tasks, func (t:SagaTask): SagaTask{
+                        if (t.ttid == _ttid){
+                            res := true;
+                            return {
+                                ttid = t.ttid;
+                                task = t.task;
+                                comp = t.comp;
+                                status = _status;
+                            };
+                        } else { return t; };
+                    });
+                    comps := List.map(comps, func (t:CompTask): CompTask{
+                        if (t.tcid == _ttid){
+                            res := true;
+                            return {
+                                forTtid = t.forTtid;
+                                tcid = t.tcid;
+                                comp = t.comp;
+                                status = _status;
+                            };
+                        } else { return t; };
+                    });
+                    let orderNew : Order = {
+                        compStrategy = order.compStrategy;
+                        tasks = tasks;
+                        allowPushing = order.allowPushing;
+                        comps = comps;
+                        status = order.status;
+                        callbackStatus = order.callbackStatus;
+                        time = order.time;
+                        data = order.data;
+                    };
+                    orders.put(_toid, orderNew);
+                };
+                case(_){};
+            };
+            return res;
+        };
+        private func __push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _autoAddLastTtid: Bool) : Ttid{
+            assert(_inOrders(_toid) and _isOpening(_toid));
+            let task: SyncTA.Task = _taskFromRequest(_toid, _task, _autoAddLastTtid);
+            let tid = actuator().push(task);
+            let comp = _compFromRequest(_toid, tid, _comp);
+            let sagaTask: SagaTask = {
+                ttid = tid;
+                task = task;
+                comp = comp;
+                status = #Doing;
+            };
+            _putTask(_toid, sagaTask);
+            return tid;
+        };
 
         // The following methods are used for transaction order operations.
-        public func create(_compStrategy: CompStrategy, _data: ?Blob) : Toid{
+        public func create(_compStrategy: CompStrategy, _data: ?Blob, _callback: ?OrderCallback) : Toid{
             assert(this != Principal.fromText("aaaaa-aa"));
             let toid = index;
             index += 1;
@@ -635,20 +720,19 @@ module {
                 data = _data;
             };
             _pushOrder(toid, order);
+            switch(_callback){
+                case(?(callback)){ orderCallback.put(toid, callback); };
+                case(_){};
+            };
             return toid;
         };
-        public func push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest) : Ttid{
-            assert(_inOrders(_toid) and _isOpening(_toid));
-            let task: SyncTA.Task = _taskFromRequest(_toid, _task);
-            let tid = actuator().push(task);
-            let comp = _compFromRequest(_toid, tid, _comp);
-            let sagaTask: SagaTask = {
-                ttid = tid;
-                task = task;
-                comp = comp;
+        public func push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
+            let ttid = __push(_toid, _task, _comp, true);
+            switch(_callback){
+                case(?(callback)){ taskCallback.put(ttid, callback); };
+                case(_){};
             };
-            _putTask(_toid, sagaTask);
-            return tid;
+            return ttid;
         };
         public func setComp(_toid: Toid, _ttid: Ttid, _comp: ?PushCompRequest) : Bool{
             assert(_isOpening(_toid) and Option.get(_orderLastTid(_toid), 0) == _ttid);
@@ -690,7 +774,7 @@ module {
             return orders.get(_toid);
         };
         public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order)]; totalPage: Nat; total: Nat}{
-            return SyncTA.getTM<Order>(orders, _page, _size, index, firstIndex);
+            return SyncTA.getTM<Order>(orders, index, firstIndex, _page, _size);
         };
         public func getAliveOrders() : [(Toid, ?Order)]{
             return Array.map<(Toid, Time.Time), (Toid, ?Order)>(List.toArray(aliveOrders), 
@@ -703,7 +787,7 @@ module {
             for (tid in Option.get(taskEvents.get(_toid), []).vals()){
                 let event_ =  actuator().getTaskEvent(tid);
                 switch(event_){
-                    case(?(event)) { events := Array.append(events, [event]); };
+                    case(?(event)) { events := SyncTA.arrayAppend(events, [event]); };
                     case(_){};
                 };
             };
@@ -731,18 +815,23 @@ module {
         
         // The following methods are used for governance or manual compensation.
         /// update: Used to modify a task when blocking.
-        public func update(_toid: Toid, _ttid: Ttid, _task: PushTaskRequest, _comp: ?PushCompRequest) : Ttid{
+        public func update(_toid: Toid, _ttid: Ttid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             assert(not(actuator().isCompleted(_ttid)));
-            let task: SyncTA.Task = _taskFromRequest(_toid, _task);
+            let task: SyncTA.Task = _taskFromRequest(_toid, _task, false);
             let tid = actuator().update(_ttid, task);
             let comp = _compFromRequest(_toid, tid, _comp);
             let sagaTask: SagaTask = {
                 ttid = tid;
                 task = task;
                 comp = comp;
+                status = #Doing;
             };
             _updateTask(_toid, sagaTask);
+            switch(_callback){
+                case(?(callback)){ taskCallback.put(tid, callback); };
+                case(_){};
+            };
             return tid;
         };
         /// remove: Used to undo an unexecuted task.
@@ -754,15 +843,20 @@ module {
             return tid_;
         };
         /// append: Used to add a new task to an executing transaction order.
-        public func append(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest) : Ttid{
+        public func append(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
-            return push(_toid, _task, _comp);
+            let ttid = __push(_toid, _task, _comp, false);
+            switch(_callback){
+                case(?(callback)){ taskCallback.put(ttid, callback); };
+                case(_){};
+            };
+            return ttid;
         };
         /// complete: Used to change the status of a blocked order to completed.
         public func complete(_toid: Toid, _status: OrderStatus) : async Bool{
             assert(_status == #Done or _status == #Recovered);
             if (_statusEqual(_toid, #Blocking) and not(_isOpening(_toid)) and _isTasksDone(_toid)){
-                await _orderComplete(_toid, #Done);
+                await _orderComplete(_toid, _status);
                 ignore actuator().removeByOid(_toid);
                 return true;
             };
@@ -778,6 +872,8 @@ module {
                 orders = Iter.toArray(orders.entries());
                 aliveOrders = aliveOrders; 
                 taskEvents = Iter.toArray(taskEvents.entries());
+                //taskCallback = Iter.toArray(taskCallback.entries());
+                //orderCallback = Iter.toArray(orderCallback.entries());
                 actuator = actuator().getData(); 
             };
         };
@@ -788,6 +884,8 @@ module {
             orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, Hash.hash);
             aliveOrders := _data.aliveOrders;
             taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, Hash.hash);
+            //taskCallback := TrieMap.fromEntries(_data.taskCallback.vals(), Nat.equal, Hash.hash);
+            //orderCallback := TrieMap.fromEntries(_data.orderCallback.vals(), Nat.equal, Hash.hash);
             actuator().setData(_data.actuator);
         };
         

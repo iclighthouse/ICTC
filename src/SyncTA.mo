@@ -1,5 +1,5 @@
 /**
- * Module     : SyncTA.mo v0.1 Alpha
+ * Module     : SyncTA.mo v0.2
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
@@ -16,6 +16,7 @@ import Iter "mo:base/Iter";
 import List "mo:base/List";
 import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
+import Buffer "mo:base/Buffer";
 import CallType "./CallType"; 
 // import Call "mo:base/ExperimentalInternetComputer";
 
@@ -75,6 +76,16 @@ module {
         errIndex: Nat; 
         firstErrIndex: Nat; 
     };
+    public func arrayAppend<T>(a: [T], b: [T]) : [T]{
+        let buffer = Buffer.Buffer<T>(1);
+        for (t in a.vals()){
+            buffer.add(t);
+        };
+        for (t in b.vals()){
+            buffer.add(t);
+        };
+        return buffer.toArray();
+    };
     public func getTM<V>(_tm: TrieMap.TrieMap<Nat, V>, _index: Nat, _firstIndex: Nat, _page: Nat, _size: Nat) : {data: [(Nat, V)]; totalPage: Nat; total: Nat}{
         let length = _tm.size();
         if (_page < 1 or _size < 1){
@@ -100,7 +111,7 @@ module {
         for (i in Iter.range(end, start)){
             switch(_tm.get(i)){
                 case(?(item)){
-                    data := Array.append(data, [(i, item)]);
+                    data := arrayAppend(data, [(i, item)]);
                 };
                 case(_){};
             };
@@ -163,7 +174,7 @@ module {
                         if (_toid != Option.get(task.toid, 0)){
                             _push(ttid, task);
                         }else{
-                            res := Array.append(res, [ttid]);
+                            res := arrayAppend(res, [ttid]);
                         };
                     };
                     case(_){};
@@ -175,7 +186,7 @@ module {
             return List.size(tasks.0) + List.size(tasks.1);
         };
         private func _toArray() : [(Ttid, Task)] {
-            return Array.append(List.toArray(tasks.0), List.toArray(tasks.1));
+            return arrayAppend(List.toArray(tasks.0), List.toArray(tasks.1));
         };
         private func _filter(_ttid: Ttid, _task: Task) : Bool {
             for (preTtid in _task.preTtid.vals()){
@@ -361,7 +372,7 @@ module {
                             };
                             //receiption := receipt; // for test
                             //prelog
-                            var attempts = _preLog(ttid, task);
+                            var attempts = _preLog(ttid, task); // attempts+1
                             //call
                             var domain: CallType.Domain = #Canister(task.callee, task.cycles);
                             switch(task.callType){
@@ -369,26 +380,24 @@ module {
                                 case(_){};
                             };
                             let result = await CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
-                            //callback
-                            var callbackStatus: ?Status = null;
-                            switch(taskCallback){
-                                case(?(_taskCallback)){
-                                    try{
-                                        await _taskCallback(ttid, task, result);
-                                        callbackStatus := ?#Done;
-                                    } catch(e){
-                                        callbackStatus := ?#Error;
+                            if (result.0 != #Error or attempts >= task.attemptsMax){
+                                //callback
+                                var callbackStatus: ?Status = null;
+                                switch(taskCallback){
+                                    case(?(_taskCallback)){
+                                        try{
+                                            await _taskCallback(ttid, task, result);
+                                            callbackStatus := ?#Done;
+                                        } catch(e){
+                                            callbackStatus := ?#Error;
+                                        };
                                     };
+                                    case(_){};
                                 };
-                                case(_){};
-                            };
-                            //postlog
-                            _postLog(ttid, result);
-                            //callbacklog
-                            _callbackLog(ttid, callbackStatus);
-                            if (attempts >= task.attemptsMax){
-                                toRedo := false;
-                            } else if (result.0 != #Error){
+                                //postlog
+                                _postLog(ttid, result);
+                                //callbacklog
+                                _callbackLog(ttid, callbackStatus);
                                 toRedo := false;
                             };
                             callCount += 1;

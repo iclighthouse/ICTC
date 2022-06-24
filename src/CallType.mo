@@ -2,18 +2,22 @@
  * Module     : CallType.mo
  * Author     : ICLighthouse Team
  * Stability  : Experimental
- * Description: CallType (Modify CallType to suit your needs).
+ * Description: Wrapping the methods used by the transaction. Modify this file to suit your needs.
+                Notes: Upgrading canister after modifying CallType and Receipt types will cause the transaction log to be lost.
  * Refers     : https://github.com/iclighthouse/ICTC
  */
 
 import Blob "mo:base/Blob";
-import CF "./CF";
+import CF "./lib/CF";
 import Cycles "mo:base/ExperimentalCycles";
-import CyclesWallet "./CyclesWallet";
-import DRC20 "./DRC20";
+import CyclesWallet "./lib/CyclesWallet";
+import DRC20 "./lib/DRC20";
+import DIP20 "./lib/DIP20";
+import ICTokens "./lib/ICTokens";
+import ICSwap "./lib/ICSwap";
 import Error "mo:base/Error";
-import IC "./IC";
-import Ledger "./Ledger";
+import IC "./lib/IC";
+import Ledger "./lib/Ledger";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
@@ -77,44 +81,48 @@ module {
         //     #cyclesToIcp : (CF.Address, ?CF.Nonce, ?CF.Data);
         //     #icpToCycles : (CF.IcpE8s, CF.CyclesWallet, ?CF.Nonce, ?CF.Sa, ?CF.Data);
         //     #claim : (CF.CyclesWallet, ?CF.Nonce, ?CF.Sa, ?CF.Data);
-        //     #count : ?CF.Address;
-        //     #feeStatus;
-        //     #getConfig;
         //     #getEvents : ?CF.Address;
-        //     #lastTxids : ?CF.Address;
         //     #liquidity : ?CF.Address;
         //     #lpRewards : CF.Address;
-        //     #txnRecord : CF.Txid;
         //     #txnRecord2 : CF.Txid;
         //     #withdraw: ?CF.Sa;
         //     #yield;
-        //     #version;
         // };
         #DRC20: {
-            #allowance : (DRC20.Address, DRC20.Spender);
-            #approvals : DRC20.Address;
             #approve : (DRC20.Spender, DRC20.Amount, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
             #balanceOf : DRC20.Address;
-            #cyclesBalanceOf : DRC20.Address;
             #cyclesReceive : ?DRC20.Address;
             #decimals;
             #executeTransfer : (DRC20.Txid, DRC20.ExecuteType, ?DRC20.To, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
-            #gas;
             #lockTransfer : (DRC20.To, DRC20.Amount, DRC20.Timeout, ?DRC20.Decider, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
             #lockTransferFrom : (DRC20.From, DRC20.To, DRC20.Amount, DRC20.Timeout, ?DRC20.Decider, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data );
-            #metadata;
-            #name;
-            #standard;
             #subscribe : (DRC20.Callback, [DRC20.MsgType], ?DRC20.Sa);
-            #subscribed : DRC20.Address;
-            #symbol;
-            #totalSupply;
             #transfer : (DRC20.To, DRC20.Amount, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
             #transferFrom : (DRC20.From, DRC20.To, DRC20.Amount, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
             #txnQuery : DRC20.TxnQueryRequest;
             #txnRecord : DRC20.Txid;
             #getCoinSeconds : ?DRC20.Address;
         }; 
+        #ICTokens: {
+            #mint: (_to:DRC20.Address, _value: DRC20.Amount, _nonce: ?DRC20.Nonce, _data: ?DRC20.Data);
+            #burn: (_value: DRC20.Amount, _nonce: ?DRC20.Nonce, _sa: ?DRC20.Sa, _data: ?DRC20.Data);
+            #heldFirstTime: DRC20.Address;
+        };
+        #DIP20: {
+            #transfer : (to: Principal, value: Nat);
+            #transferFrom : (from: Principal, to: Principal, value: Nat);
+            #approve : (spender: Principal, value: Nat);
+            #decimals;
+            #balanceOf : (who: Principal);
+        };
+        #ICSwap: {
+            #swap : (_value: {#token0: ICSwap.Amount; #token1: ICSwap.Amount}, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #swap2 : (_tokenId: Principal, _value: ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #add : (_value0: ?ICSwap.Amount, _value1: ?ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #remove : (_shares: ?ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #claim : (_nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #fallback : (_sa: ?ICSwap.Sa);
+        };
         #This: {
             #foo: (Nat);
         };
@@ -157,44 +165,48 @@ module {
         //     #cyclesToIcp : CF.TxnResult;
         //     #icpToCycles : CF.TxnResult;
         //     #claim : CF.TxnResult;
-        //     #count : Nat;
-        //     #feeStatus: CF.FeeStatus;
-        //     #getConfig: CF.Config;
         //     #getEvents : [CF.TxnRecord];
-        //     #lastTxids : [CF.Txid];
         //     #liquidity : CF.Liquidity;
         //     #lpRewards : { cycles: Nat; icp: Nat; };
-        //     #txnRecord : ?CF.TxnRecord;
         //     #txnRecord2 : ?CF.TxnRecord;
         //     #withdraw: ();
         //     #yield: (apy24h: { apyCycles: Float; apyIcp: Float; }, apy7d: { apyCycles: Float; apyIcp: Float; });
-        //     #version: Text;
         // };
         #DRC20: {
-            #allowance : DRC20.Amount;
-            #approvals : [DRC20.Allowance];
             #approve : DRC20.TxnResult;
             #balanceOf : DRC20.Amount;
-            #cyclesBalanceOf : Nat;
             #cyclesReceive : Nat;
             #decimals: Nat8;
             #executeTransfer : DRC20.TxnResult;
-            #gas: DRC20.Gas;
             #lockTransfer : DRC20.TxnResult;
             #lockTransferFrom : DRC20.TxnResult;
-            #metadata: [DRC20.Metadata];
-            #name: Text;
-            #standard: Text;
             #subscribe : Bool;
-            #subscribed : ?DRC20.Subscription;
-            #symbol: Text;
-            #totalSupply: DRC20.Amount;
             #transfer : DRC20.TxnResult;
             #transferFrom : DRC20.TxnResult;
             #txnQuery : DRC20.TxnQueryResponse;
             #txnRecord : ?DRC20.TxnRecord;
             #getCoinSeconds : (DRC20.CoinSeconds, ?DRC20.CoinSeconds);
         }; 
+        #ICTokens: {
+            #mint: DRC20.TxnResult;
+            #burn: DRC20.TxnResult;
+            #heldFirstTime: ?Int;
+        };
+        #DIP20: {
+            #transfer : DIP20.TxReceipt;
+            #transferFrom : DIP20.TxReceipt;
+            #approve : DIP20.TxReceipt;
+            #decimals : Nat8;
+            #balanceOf : Nat;
+        };
+        #ICSwap: {
+            #swap : ICSwap.TxnResult;
+            #swap2 : ICSwap.TxnResult;
+            #add : ICSwap.TxnResult;
+            #remove : ICSwap.TxnResult;
+            #claim : ICSwap.TxnResult;
+            #fallback : ();
+        };
         #This: {
             #foo: ();
         };
@@ -224,7 +236,7 @@ module {
                 };
             };
             // Cross-Canister Task Call
-            case(#Canister(callee, cycles)){
+            case(#Canister((callee, cycles))){
                 var calleeId = Principal.toText(callee);
                 switch(_args){
                     case(#__skip){ return (#Done, ?#__skip, null); };
@@ -263,17 +275,6 @@ module {
                         let token: DRC20.Self = actor(calleeId);
                         if (cycles > 0){ Cycles.add(cycles); };
                         switch(method){
-                            case(#allowance(user, spender)){
-                                var result: Nat = 0; // Receipt
-                                try{
-                                    // do
-                                    result := await token.drc20_allowance(user, spender);
-                                    // check & return
-                                    return (#Done, ?#DRC20(#allowance(result)), null);
-                                } catch (e){
-                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                                };
-                            };
                             case(#balanceOf(user)){
                                 var result: Nat = 0; // Receipt
                                 try{
@@ -281,17 +282,6 @@ module {
                                     result := await token.drc20_balanceOf(user);
                                     // check & return
                                     return (#Done, ?#DRC20(#balanceOf(result)), null);
-                                } catch (e){
-                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                                };
-                            };
-                            case(#totalSupply){
-                                var result: Nat = 0; // Receipt
-                                try{
-                                    // do
-                                    result := await token.drc20_totalSupply();
-                                    // check & return
-                                    return (#Done, ?#DRC20(#totalSupply(result)), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
@@ -399,17 +389,6 @@ module {
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
-                            case(#subscribed(user)){
-                                var result: ?DRC20.Subscription = null; // Receipt
-                                try{
-                                    // do
-                                    result := await token.drc20_subscribed(user);
-                                    // check & return
-                                    return (#Done, ?#DRC20(#subscribed(result)), null);
-                                } catch (e){
-                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                                };
-                            };
                             case(#txnQuery(request)){
                                 var result: DRC20.TxnQueryResponse = #getTxn(null); // Receipt
                                 try{
@@ -444,6 +423,198 @@ module {
                                 };
                             };
                             case(_){ return (#Error, null, ?{code=#future(9902); message="No such method."; });};
+                        };
+                    };
+                    case(#DIP20(method)){
+                        let token: DIP20.Self = actor(calleeId);
+                        if (cycles > 0){ Cycles.add(cycles); };
+                        switch(method){
+                            case(#balanceOf(user)){
+                                var result: Nat = 0; // Receipt
+                                try{
+                                    // do
+                                    result := await token.balanceOf(user);
+                                    // check & return
+                                    return (#Done, ?#DIP20(#balanceOf(result)), null);
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#approve(spender, amount)){
+                                var result: DIP20.TxReceipt = #Err(#Other("")); // Receipt
+                                try{
+                                    // do
+                                    result := await token.approve(spender, amount);
+                                    // check & return
+                                    switch(result){
+                                        case(#Ok(txid)){ return (#Done, ?#DIP20(#approve(result)), null); };
+                                        case(#Err(e)){ return (#Error, ?#DIP20(#approve(result)), ?{code=#future(9903); message="DIP20 token Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#transfer(to, amount)){
+                                var result: DIP20.TxReceipt = #Err(#Other("")); // Receipt
+                                try{
+                                    // do
+                                    result := await token.transfer(to, amount);
+                                    // check & return
+                                    switch(result){
+                                        case(#Ok(txid)){ return (#Done, ?#DIP20(#transfer(result)), null); };
+                                        case(#Err(e)){ return (#Error, ?#DIP20(#transfer(result)), ?{code=#future(9903); message="DIP20 token Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#transferFrom(from, to, amount)){
+                                var result: DIP20.TxReceipt = #Err(#Other("")); // Receipt
+                                try{
+                                    // do
+                                    result := await token.transferFrom(from, to, amount);
+                                    // check & return
+                                    switch(result){
+                                        case(#Ok(txid)){ return (#Done, ?#DIP20(#transferFrom(result)), null); };
+                                        case(#Err(e)){ return (#Error, ?#DIP20(#transferFrom(result)), ?{code=#future(9903); message="DIP20 token Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(_){ return (#Error, null, ?{code=#future(9902); message="No such method."; });};
+                        };
+                    };
+                    case(#ICTokens(method)){
+                        let token: ICTokens.Self = actor(calleeId);
+                        if (cycles > 0){ Cycles.add(cycles); };
+                        switch(method){
+                            case(#mint(_to, _value, _nonce, _data)){
+                                var result: ICTokens.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await token.ictokens_mint(_to, _value, _nonce, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(txid)){ return (#Done, ?#ICTokens(#mint(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICTokens(#mint(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#burn(_value, _nonce, _sa, _data)){
+                                var result: ICTokens.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await token.ictokens_burn(_value, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(txid)){ return (#Done, ?#ICTokens(#burn(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICTokens(#burn(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#heldFirstTime(_owner)){
+                                var result: ?Int = ?0; // Receipt
+                                try{
+                                    // do
+                                    result := await token.ictokens_heldFirstTime(_owner);
+                                    // check & return
+                                    return (#Done, ?#ICTokens(#heldFirstTime(result)), null);
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            //case(_){ return (#Error, null, ?{code=#future(9902); message="No such method."; });};
+                        };
+                    };
+                    case(#ICSwap(method)){
+                        let swap: ICSwap.Self = actor(calleeId);
+                        if (cycles > 0){ Cycles.add(cycles); };
+                        switch(method){
+                            case(#swap(_value, _nonce, _sa, _data)){
+                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.swap(_value, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICSwap(#swap(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICSwap(#swap(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#swap2(_tokenId, _value, _nonce, _sa, _data)){
+                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.swap2(_tokenId, _value, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICSwap(#swap2(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICSwap(#swap2(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#add(_value0, _value1, _nonce, _sa, _data)){
+                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.add(_value0, _value1, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICSwap(#add(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICSwap(#add(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#remove(_shares, _nonce, _sa, _data)){
+                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.remove(_shares, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICSwap(#remove(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICSwap(#remove(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#claim(_nonce, _sa, _data)){
+                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="Not called."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.claim(_nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICSwap(#claim(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICSwap(#claim(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#fallback(_sa)){
+                                try{
+                                    // do
+                                    let result = await swap.fallback(_sa);
+                                    // check & return
+                                    return (#Done, ?#ICSwap(#fallback(result)), null);
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
                         };
                     };
                     case(_){ return (#Error, null, ?{code=#future(9901); message="No such actor."; });};

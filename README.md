@@ -77,15 +77,15 @@ The Transaction Manager is used to manage the status of transactions, operate th
 
 ## Transaction Compensator
 
-The Transaction Compensator is used to execute compensation operations when an exception occurs in a transaction, including automatic compensation, governance or manual compensation.
+The Transaction Compensator function is implemented in Transaction Manager and is used to execute compensation operations when an exception occurs in a transaction, including automatic compensation, governance or manual compensation.
 
 ## Roadmap
 
-- ICTC Framework PoC Version
-- Synchronous Actuator
-- Saga Transaction Manager
-- ICTC Framework Alpha Version
-- Asynchronous Actuator
+- ICTC Framework PoC Version  (done)
+- Synchronous Actuator  (done)
+- Saga Transaction Manager  (done)
+- ICTC Framework Alpha Version  (done)
+- Asynchronous Actuator (doing)
 - 2PC Transaction Manager
 - ICTC Framework Beta Version
 - ICTC Framework v1.0
