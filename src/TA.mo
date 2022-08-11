@@ -1,71 +1,46 @@
 /**
- * Module     : SyncTA.mo v0.2
+ * Module     : TA.mo v0.7
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
  * Refers     : https://github.com/iclighthouse/ICTC
  */
 
-import Nat "mo:base/Nat";
 import Array "mo:base/Array";
+import Blob "mo:base/Blob";
+import Buffer "mo:base/Buffer";
+import CallType "./CallType";
+import Deque "mo:base/Deque";
 import Hash "mo:base/Hash";
+import Iter "mo:base/Iter";
+import List "mo:base/List";
+import Nat "mo:base/Nat";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
-import Iter "mo:base/Iter";
-import List "mo:base/List";
-import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
-import Buffer "mo:base/Buffer";
-import CallType "./CallType"; 
+import TATypes "TATypes";
+import TaskHash "TaskHash";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 // As motoko does not currently support features such as candid encode/decode, call_raw and reflection, a temporary solution is used.
 module {
-    public let Version: Nat = 1;
+    public let Version: Nat = 7;
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
     public type Receipt = CallType.Receipt;
     public type LocalCall = CallType.LocalCall;
     public type TaskResult = CallType.TaskResult;
-    public type Callee = Principal;
-    public type CalleeStatus = {
-        successCount: Nat;
-        failureCount: Nat;
-        continuousFailure: Nat;
-    };
-    public type Ttid = Nat; // from 1
-    public type Toid = Nat; // from 1
-    public type Attempts = Nat;
-    public type Task = {
-        callee: Callee;
-        callType: CallType;
-        preTtid: [Ttid];
-        toid: ?Toid;
-        compFor: ?Ttid;
-        attemptsMax: Attempts;
-        recallInterval: Int; // nanoseconds
-        cycles: Nat;
-        data: ?Blob;
-        time: Time.Time;
-    };
-    public type Callback = (_ttid: Ttid, _task: Task, _result: TaskResult) -> async ();
-    public type TaskEvent = {
-        toid: ?Toid;
-        ttid: Ttid;
-        task: Task;
-        attempts: Attempts;
-        result: TaskResult;  // (Status, ?Receipt, ?Err)
-        callbackStatus: ?Status;
-        time: Time.Time;
-    };
-    public type ErrorLog = { // errorLog
-        ttid: Ttid;
-        callee: ?Callee;
-        result: ?TaskResult;
-        time: Time.Time;
-    };
+    public type Callee = TATypes.Callee;
+    public type CalleeStatus = TATypes.CalleeStatus;
+    public type Ttid = TATypes.Ttid; // from 1
+    public type Toid = TATypes.Toid; // from 1
+    public type Attempts = TATypes.Attempts;
+    public type Task = TATypes.Task;
+    public type Callback = TATypes.Callback;
+    public type TaskEvent = TATypes.TaskEvent;
+    public type ErrorLog = TATypes.ErrorLog;
     public type Data = {
         tasks: Deque.Deque<(Ttid, Task)>; 
         taskLogs: [(Ttid, TaskEvent)]; 
@@ -121,8 +96,8 @@ module {
         return {data = data; totalPage = totalPage; total = length; };
     };
     
-    /// limitAtOnce: The actuator runs `limitAtOnce` tasks at once.
-    public class SyncTA(limitAtOnce: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, taskCallback: ?Callback) {
+    /// limitNum: The actuator runs `limitNum` tasks at once.
+    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, taskCallback: ?Callback) {
         var tasks = Deque.empty<(Ttid, Task)>();
         var index : Nat = 1;
         var firstIndex : Nat = 1;
@@ -228,6 +203,7 @@ module {
                 result = (#Doing, null, null);
                 callbackStatus = null;
                 time = Time.now();
+                txHash = Blob.fromArray([]);
             };
             taskLogs.put(_ttid, taskLog);
             return attempts;
@@ -235,7 +211,7 @@ module {
         private func _postLog(_ttid: Ttid, _result: TaskResult) : (){
             switch(taskLogs.get(_ttid)){
                 case(?(taskLog)){
-                    let log: TaskEvent = {
+                    var log: TaskEvent = {
                         toid = taskLog.toid;
                         ttid = taskLog.ttid;
                         task = taskLog.task;
@@ -243,6 +219,18 @@ module {
                         result = _result;
                         callbackStatus = null;
                         time = Time.now();
+                        txHash = taskLog.txHash;
+                    };
+                    let txHash = TaskHash.hashb(Blob.fromArray([]), log);
+                    log := {
+                        toid = log.toid;
+                        ttid = log.ttid;
+                        task = log.task;
+                        attempts = log.attempts;
+                        result = log.result;
+                        callbackStatus = log.callbackStatus;
+                        time = log.time;
+                        txHash = txHash;
                     };
                     taskLogs.put(_ttid, log);
                     var calleeStatus = { successCount = 1; failureCount = 0; continuousFailure = 0;};
@@ -292,6 +280,7 @@ module {
                         result = taskLog.result;
                         callbackStatus = _callbackStatus;
                         time = taskLog.time;
+                        txHash = taskLog.txHash;
                     };
                     taskLogs.put(_ttid, log);
                 };
@@ -352,16 +341,16 @@ module {
             var count: Nat = 0;
             var callCount: Nat = 0;
             var receipt: ?CallType.Receipt = null;
-            while (count < limitAtOnce and callCount < size * 2 and Option.isSome(Deque.peekFront(tasks))){
+            while (count < limitNum and callCount < size * 2 and Option.isSome(Deque.peekFront(tasks))){
                 switch(Deque.popFront(tasks)){
                     case(?((ttid, task), deque)){
                         tasks := deque;
                         var toRedo: Bool = true;
                         if(_filter(ttid, task)){
                             //get receipt
-                            switch(task.compFor){
-                                case(?(compForTid)){
-                                    switch(taskLogs.get(compForTid)){
+                            switch(task.forTtid){
+                                case(?(forTtid)){
+                                    switch(taskLogs.get(forTtid)){
                                         case(?(taskLog)){
                                             receipt := taskLog.result.1;
                                         };

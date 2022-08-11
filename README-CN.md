@@ -79,13 +79,13 @@ Transaction Compensator的功能在Transaction Manager中一起实现，其作�
 
 ## Roadmap
 
-- ICTC Framework PoC Version
-- Synchronous Actuator
-- Saga Transaction Manager
-- ICTC Framework Alpha Version
-- Asynchronous Actuator
-- 2PC Transaction Manager
-- ICTC Framework Beta Version
+- ICTC Framework PoC Version  (done)
+- Synchronous Actuator  (done)
+- Saga Transaction Manager  (done)
+- ICTC Framework Alpha Version  (done)
+- Transaction Actuator (Sync + Async) (done)
+- 2PC Transaction Manager (done)
+- ICTC Framework Beta Version (doing)
 - ICTC Framework v1.0
 
 ## Community

@@ -22,7 +22,7 @@ module {
   public type Data = Blob;
   public type Shares = Nat;
   public type TokenType = { #Cycles; #Icp;#Token: Principal; };
-  public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #other: Text; };
+  public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #icrc1; #other: Text; };
   public type OperationType = {
       #AddLiquidity;
       #RemoveLiquidity;

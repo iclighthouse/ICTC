@@ -85,9 +85,9 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 - Synchronous Actuator  (done)
 - Saga Transaction Manager  (done)
 - ICTC Framework Alpha Version  (done)
-- Asynchronous Actuator (doing)
-- 2PC Transaction Manager
-- ICTC Framework Beta Version
+- Transaction Actuator (Sync + Async) (done)
+- 2PC Transaction Manager (done)
+- ICTC Framework Beta Version (doing)
 - ICTC Framework v1.0
 
 ## Community
