@@ -1,5 +1,5 @@
 /**
- * Module     : SagaTM.mo v0.7
+ * Module     : SagaTM.mo v0.5
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Saga Transaction Manager.
@@ -17,9 +17,10 @@ import List "mo:base/List";
 import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
 import TA "./TA";
+import Error "mo:base/Error";
 
 module {
-    public let Version: Nat = 7;
+    public let Version: Nat = 6;
     public type Toid = Nat;
     public type Ttid = TA.Ttid;
     public type Tcid = TA.Ttid;
@@ -62,6 +63,7 @@ module {
         status: Status;
     };
     public type Order = {
+        name: Text;
         compStrategy: CompStrategy;
         tasks: List.List<SagaTask>;
         allowPushing: {#Opening; #Closed;};
@@ -84,16 +86,16 @@ module {
     };
 
     public class SagaTM(this: Principal, localCall: LocalCall, defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
-        let limitAtOnce: Nat = 20;
+        let limitAtOnce: Nat = 30;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
-        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, Hash.hash);
+        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, TA.natHash);
         var aliveOrders = List.nil<(Toid, Time.Time)>();
-        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, Hash.hash);
+        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, TA.natHash);
         var actuator_: ?TA.TA = null;
-        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, Hash.hash);
-        var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, Hash.hash);
+        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash);
+        var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, TA.natHash);
         private func actuator() : TA.TA {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
@@ -123,17 +125,28 @@ module {
             // task status
             ignore _setTaskStatus(toid, _ttid, _result.0);
             // task callback
+            var callbackDone : Bool = false;
             switch(taskCallback.get(_ttid)){
                 case(?(_taskCallback)){ 
-                    await _taskCallback(_ttid, _task, _result); 
-                    taskCallback.delete(_ttid);
+                    try{
+                        await _taskCallback(_ttid, _task, _result); 
+                        taskCallback.delete(_ttid);
+                        callbackDone := true;
+                    } catch(e){
+                        callbackDone := false;
+                    };
                 };
                 case(_){
                     switch(defaultTaskCallback){
                         case(?(_taskCallback)){
-                            await _taskCallback(_ttid, _task, _result);
+                            try{
+                                await _taskCallback(_ttid, _task, _result);
+                                callbackDone := true;
+                            }catch(e){
+                                callbackDone := false;
+                            };
                         };
-                        case(_){};
+                        case(_){ callbackDone := true; };
                     };
                 };
             };
@@ -142,16 +155,16 @@ module {
                 if (_result.0 == #Done and isClosed and Option.get(_orderLastCid(toid), 0) == _ttid){ 
                     await _orderComplete(toid, #Recovered);
                     _removeTATaskByOid(toid);
-                }else if (_result.0 == #Error or _result.0 == #Unknown){ //Blocking
+                }else if (_result.0 == #Error or _result.0 == #Unknown or not(callbackDone)){ //Blocking
                     _setStatus(toid, #Blocking);
                 };
             } else if (orderStatus == #Doing){ //Doing 
-                if (_result.0 == #Done and isClosed and Option.get(_orderLastTid(toid), 0) == _ttid){ //
+                if (_result.0 == #Done and isClosed and Option.get(_orderLastTid(toid), 0) == _ttid){ // Done
                     await _orderComplete(toid, #Done);
                 }else if (_result.0 == #Error and strategy == #Backward){ // recovery
                     _setStatus(toid, #Compensating);
                     _compensate(toid, _ttid);
-                }else if (_result.0 == #Error or _result.0 == #Unknown){ //Blocking
+                }else if (_result.0 == #Error or _result.0 == #Unknown or not(callbackDone)){ //Blocking
                     _setStatus(toid, #Blocking);
                 };
             } else { // Blocking
@@ -168,6 +181,10 @@ module {
                 case(_){
                     taskEvents.put(toid, [_ttid]);
                 };
+            };
+            //return
+            if (not(callbackDone)){
+                throw Error.reject("Task Callback Error.");
             };
         };
 
@@ -285,6 +302,7 @@ module {
                     assert(order.allowPushing == #Opening);
                     let tasks = List.push(_sagaTask, order.tasks);
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = tasks;
                         allowPushing = order.allowPushing;
@@ -309,6 +327,7 @@ module {
                         if (t.ttid == _sagaTask.ttid){ _sagaTask } else { t };
                     });
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = tasks;
                         allowPushing = order.allowPushing;
@@ -331,6 +350,7 @@ module {
                 case(?(order)){
                     let tasks = List.filter(order.tasks, func (t:SagaTask): Bool{ t.ttid != _ttid });
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = tasks;
                         allowPushing = order.allowPushing;
@@ -371,6 +391,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = order.tasks;
                         allowPushing = _setting;
@@ -415,15 +436,23 @@ module {
                     try{ 
                         switch(orderCallback.get(_toid)){
                             case(?(_orderCallback)){ 
-                                await _orderCallback(_toid, _tatus, order.data); 
-                                orderCallback.delete(_toid);
-                                callbackStatus := ?#Done;
+                                try{
+                                    await _orderCallback(_toid, _tatus, order.data); 
+                                    orderCallback.delete(_toid);
+                                    callbackStatus := ?#Done;
+                                }catch(e){
+                                    callbackStatus := ?#Error;
+                                };
                             };
                             case(_){
                                 switch(defaultOrderCallback){
                                     case(?(_orderCallback)){
-                                        await _orderCallback(_toid, _tatus, order.data); 
-                                        callbackStatus := ?#Done;
+                                        try{
+                                            await _orderCallback(_toid, _tatus, order.data); 
+                                            callbackStatus := ?#Done;
+                                        }catch(e){
+                                            callbackStatus := ?#Error;
+                                        };
                                     };
                                     case(_){};
                                 };
@@ -442,6 +471,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = order.tasks;
                         allowPushing = order.allowPushing;
@@ -460,6 +490,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = order.tasks;
                         allowPushing = order.allowPushing;
@@ -579,6 +610,7 @@ module {
                 case(?(order)){
                     let comps = List.push(compTask, order.comps);
                     let orderNew = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = order.tasks;
                         allowPushing = order.allowPushing;
@@ -695,6 +727,7 @@ module {
                         } else { return t; };
                     });
                     let orderNew : Order = {
+                        name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = tasks;
                         allowPushing = order.allowPushing;
@@ -726,11 +759,12 @@ module {
         };
 
         // The following methods are used for transaction order operations.
-        public func create(_compStrategy: CompStrategy, _data: ?Blob, _callback: ?OrderCallback) : Toid{
+        public func create(_name: Text, _compStrategy: CompStrategy, _data: ?Blob, _callback: ?OrderCallback) : Toid{
             assert(this != Principal.fromText("aaaaa-aa"));
             let toid = index;
             index += 1;
             let order: Order = {
+                name = _name;
                 compStrategy = _compStrategy;
                 tasks = List.nil<SagaTask>();
                 allowPushing = #Opening;
@@ -921,9 +955,9 @@ module {
             autoClearTimeout := _data.autoClearTimeout;
             index := _data.index; 
             firstIndex := _data.firstIndex; 
-            orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, Hash.hash);
+            orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, TA.natHash);
             aliveOrders := _data.aliveOrders;
-            taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, Hash.hash);
+            taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, TA.natHash);
             //taskCallback := TrieMap.fromEntries(_data.taskCallback.vals(), Nat.equal, Hash.hash);
             //orderCallback := TrieMap.fromEntries(_data.orderCallback.vals(), Nat.equal, Hash.hash);
             actuator().setData(_data.actuator);

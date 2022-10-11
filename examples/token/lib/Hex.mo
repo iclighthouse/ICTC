@@ -5,6 +5,7 @@ import Hash "mo:base/Hash";
 import Iter "mo:base/Iter";
 import Nat8 "mo:base/Nat8";
 import Result "mo:base/Result";
+import Buffer "mo:base/Buffer";
 
 module {
     private let base : Nat8   = 16;
@@ -28,6 +29,17 @@ module {
     };
 
     public type Hex = Text;
+
+    public func arrayAppend<T>(a: [T], b: [T]) : [T]{
+        let buffer = Buffer.Buffer<T>(1);
+        for (t in a.vals()){
+            buffer.add(t);
+        };
+        for (t in b.vals()){
+            buffer.add(t);
+        };
+        return buffer.toArray();
+    };
 
     // Checks whether two hex strings are equal.
     public func equal(a : Hex, b : Hex) : Bool {
@@ -103,7 +115,7 @@ module {
     public func decode(t : Hex) : Result.Result<[Nat8], Text> {
         var cs = Iter.toArray(t.chars());
         if (cs.size() % 2 != 0) {
-            cs := Array.append(['0'], cs);
+            cs := arrayAppend(['0'], cs);
         };
         let ns = Array.init<Nat8>(cs.size() / 2, 0);
         for (i in Iter.range(0, ns.size() - 1)) {

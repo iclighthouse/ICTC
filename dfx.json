@@ -1,22 +1,22 @@
 {
   "canisters": {
     "TokenA": {
-      "main": "./token/TokenA.mo",
+      "main": "./examples/token/TokenA.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     },
     "TokenB": {
-      "main": "./token/TokenB.mo",
+      "main": "./examples/token/TokenB.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     },
     "Example": {
-      "main": "./Example.mo",
+      "main": "./examples/Example.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     },
     "Example2PC": {
-      "main": "./Example2PC.mo",
+      "main": "./examples/Example2PC.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     }

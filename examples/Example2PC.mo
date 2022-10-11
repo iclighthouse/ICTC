@@ -1,5 +1,5 @@
 /**
- * Module     : ICTCTest.mo
+ * Module     : ICTC 2PC Test
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Github     : https://github.com/iclighthouse/ICTC/
@@ -11,10 +11,10 @@ import Nat "mo:base/Nat";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Option "mo:base/Option";
-import CallType "./src/CallType";
+import CallType "../src/CallType";
 import Principal "mo:base/Principal";
-import TA "./src/TA";
-import TPCTM "./src/TPCTM";
+import TA "../src/TA";
+import TPCTM "../src/TPCTM";
 
 shared(installMsg) actor class Example() = this {
     type CallType = CallType.CallType;
@@ -31,7 +31,7 @@ shared(installMsg) actor class Example() = this {
                 switch(method){
                     case(#foo(count)){
                         var result = foo(count); // Receipt
-                        return (#Done, ?#This(#foo), null);
+                        return (#Done, ?#This(#foo(result)), null);
                     };
                 };
             };
@@ -146,7 +146,7 @@ shared(installMsg) actor class Example() = this {
         // tokenA: executeTransfer $tx1 #fallback
         // tokenB: executeTransfer $tx2 #fallback
 
-        let oid = _getTPC().create(null, null);
+        let oid = _getTPC().create("swap1", null, null);
         var prepare = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
         var commit = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
         var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
@@ -179,7 +179,7 @@ shared(installMsg) actor class Example() = this {
         // tokenA: executeTransfer $tx1 #fallback
         // tokenB: executeTransfer $tx2 #fallback
 
-        let oid = _getTPC().create(null, null);
+        let oid = _getTPC().create("swap2", null, null);
         var prepare = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
         var commit = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
         var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
@@ -303,6 +303,10 @@ shared(installMsg) actor class Example() = this {
         tpc.finish(_toid);
         let r = await tpc.run(_toid);
         return await _getTPC().complete(_toid, _status);
+    };
+    public shared(msg) func ictc_2PC_TTRun() : async Nat{ 
+        // There is no need to call it normally, but can be called if you want to execute tasks in time when a TO is in the Doing state.
+        await _getTPC().getActuator().run();
     };
     /**
     * End: ICTC Transaction Explorer Interface

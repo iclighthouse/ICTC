@@ -6,12 +6,17 @@ module {
     public type Timestamp = Nat; // seconds (Time.Time/1000000000)
     public type Address = Text;
     public type AccountId = Blob;
+    public type Token = Principal;
     public type Amount = Nat;
     public type Sa = [Nat8];
     public type Shares = Nat;
     public type Nonce = Nat;
     public type Data = Blob;
     public type Txid = Blob;
+    public type TokenSymbol = Text;
+    public type TokenInfo = (Principal, TokenSymbol, TokenStd);
+    public type TokenValue = {#token0: Amount; #token1: Amount};
+    public type OrderRequest = {#add: {token: Token; value: Amount}; #receive: {token: Token; value: Amount} };
     public type TxnRecord = DRC205.TxnRecord;
     public type ShareWeighted = {
         shareTimeWeighted: Nat; 
@@ -49,7 +54,6 @@ module {
     };
     public type FeeStatus = {
         feeRate: Float;
-        feeBalance: FeeBalance;
         totalFee: FeeBalance;
     };
     public type TransStatus = {
@@ -80,6 +84,7 @@ module {
         TOKEN0_LIMIT: Nat;
         TOKEN1_LIMIT: Nat;
         FEE: Nat;
+        ICP_FEE: Nat;
         RETENTION_RATE: Nat;
         MAX_VOLATILITY: Nat;
         //SYNC_INTERVAL: Nat;
@@ -88,6 +93,7 @@ module {
         TOKEN0_LIMIT: ?Nat;
         TOKEN1_LIMIT: ?Nat;
         FEE: ?Nat;
+        ICP_FEE: ?Nat;
         RETENTION_RATE: ?Nat;
         MAX_VOLATILITY: ?Nat;
         //SYNC_INTERVAL: ?Nat;
@@ -103,6 +109,7 @@ module {
         #NoChange;
     };
     public type TxnStatus = { #Pending; #Success; #Failure; #Blocking; };
+    public type OrderStatusResponse = {#Completed: DRC205.TxnRecord; #Pending: SwappingOrder; #Failed: SwappingOrder; #None; };
     public type TxnResult = Result.Result<{   //<#ok, #err> 
         txid: Txid;
         status: TxnStatus;
@@ -113,56 +120,72 @@ module {
             #TransferException;
             #UnacceptableVolatility;
             #TransactionBlocking;
+            #InsufficientBalance;
             #InsufficientShares;
-            #PoolIsEmpty;
+            #InsufficientPoolFund;
+            #DepositInProgress;
             #UndefinedError;
         };
         message: Text;
     }>;
-    public type OrderTemp = {  // AccountId -> OrderTemp
-        operation: DRC205.OperationType;
-        locked0: Amount; 
-        lockedTxid0: ?Txid; 
-        locked1: Amount; 
-        lockedTxid1: ?Txid;
+    // public type OrderTemp = {  // AccountId -> OrderTemp
+    //     icrc1Account: ?{owner: Principal; subaccount: ?Blob; };
+    //     operation: DRC205.OperationType;
+    //     locked0: Amount; 
+    //     lockedTxid0: ?Txid; 
+    //     locked1: Amount; 
+    //     lockedTxid1: ?Txid;
+    // };
+    public type AccountBalance = {
+        available0: Amount;
+        locked0: Amount;
+        available1: Amount;
+        locked1: Amount;
     };
-    public type OrderPending = {  // Txid -> OrderPending
+    public type SwappingOrder = {  // Txid -> SwappingOrder
         account: AccountId;
+        icrc1Account: ?{owner: Principal; subaccount: ?Blob; };
         operation: DRC205.OperationType;
-        value0: Amount; 
-        value1: Amount; 
+        value0: Amount; // put token0 amount
+        value1: Amount; // or/and token1 amount
         toid: Nat; // SagaTM.Toid
         status: TxnStatus;
         time: Time.Time;
     };
+    public type Side = { #Token0ToToken1; #Token1ToToken0; };
+    public type KBar = {kid: Nat; open: Nat; high: Nat; low: Nat; close: Nat; vol: Nat; updatedTs: Timestamp};
+    public type TrieList<K, V> = {data: [(K, V)]; total: Nat; totalPage: Nat; };
     public type Self = actor {
-        //fallback2(Address)
-        //addFromTransfer(Address)
-        //swapFromLockTransfer(Address)
-        //swapFromTransfer(_token: Principal, _account: Address, _value: Amount, _txid: Txid)
         name : shared query () -> async Text;
         version : shared query () -> async Text;
         decimals : shared query () -> async Nat8;
         token0 : shared query () -> async (DRC205.TokenType, ?TokenStd);
         token1 : shared query () -> async (DRC205.TokenType, ?TokenStd);
         getConfig : shared query () -> async Config;
-        count : shared query (_account: ?Address) -> async Nat;
-        swap : shared (_value: {#token0: Amount; #token1: Amount}, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
-        swap2 : shared (_tokenId: Principal, _value: Amount, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
-        add : shared (_value0: ?Amount, _value1: ?Amount, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
-        remove : shared (_shares: ?Amount, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
-        claim : shared (_nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
-        tokenNotify : shared (_token: Principal, _txid: Txid) -> async ();
+        getDepositAccount : shared (_account: Address) -> async ({owner: Principal; subaccount: ?Blob}, Address, Nonce, Txid); // get deposit account and nonce
+        swap : shared (_order: OrderRequest, _slip: ?Nat, _autoWithdraw: ?Bool, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
+        add : shared (_value0: ?Amount, _value1: ?Amount, _autoWithdraw: ?Bool, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
+        remove : shared (_shares: ?Amount, _autoWithdraw: ?Bool, _nonce: ?Nonce, _sa: ?Sa, _data: ?Data) -> async TxnResult;
         fallback : shared (_sa: ?Sa) -> async (); 
+        withdraw : shared (_autoWithdraw: ?Bool, _sa: ?Sa) -> async ();
+        autoWithdrawal : shared query (_account: Address) -> async Bool;
         liquidity : shared query (_account: ?Address) -> async Liquidity;
-        pending : shared query (_account: ?Address) -> async { tempLocked: [(AccountId, OrderTemp)]; pending: [(Txid, OrderPending)] };
-        txnPending : shared query (_txid: Txid) -> async ?OrderPending;
-        getEvents : shared query (_account: ?Address) -> async [TxnRecord];
-        lastTxids : shared query (_account: ?Address) -> async [Txid];
-        txnRecord : shared query (_txid: Txid) -> async (txn: ?TxnRecord);
-        txnRecord2 : shared (_txid: Txid) -> async (txn: ?TxnRecord);
+        balance : shared query (_account: Address) -> async AccountBalance;
+        pending : shared query (_account: ?Address, _page: ?Nat, _size: ?Nat) -> async TrieList<Txid, SwappingOrder>;
+        status : shared query (_account: Address, _nonce: Nat) -> async OrderStatusResponse;
+        statusByTxid : shared query (_txid: Txid) -> async OrderStatusResponse;
+        getQuotes : shared query (_ki: Nat) -> async [KBar];
         feeStatus : shared query () -> async FeeStatus;
         yield : shared query () -> async (apy24h: {apyToken0: Float; apyToken1: Float}, apy7d: {apyToken0: Float; apyToken1: Float});
-        lpRewards : shared query (_account: Address, _includePending: Bool) -> async ({value0:Nat; value1:Nat});
+        info : shared query () -> async {
+            name: Text;
+            version: Text;
+            decimals: Nat8;
+            owner: Principal;
+            paused: Bool;
+            setting: Config;
+            token0: TokenInfo;
+            token1: TokenInfo;
+        };
     }
 }

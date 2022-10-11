@@ -14,19 +14,7 @@ When a method in Canister needs to execute a cross-container call, it will face 
 - Runtime error: e.g. divide-by-0 error.
 - Fail-stop: e.g. the subnet where the callee is located is inaccessible.
 
-The IC network is free from fail-stop most of the time, but there is still the potential for this type of failures to occur. If the Defi application cannot robustly handle failures and maintain eventual consistency, the consequences could be catastrophic. Imagine the following scenario.
-
-    In a Dex canister, Alice, Bob exchange TokenA and TokenB, and the fee needs to be paid by Alice with TokenC, e.g.    
-    TokenA.transferFrom(Alice, Bob, 100);  
-    TokenB.transferFrom(Bob, Alice, 50);  
-    TokenC.transferFrom(Alice, Dex, 1);  
-    The three txns above form a transaction that requires either all of them to succeed or all of them to fail.    
-    If the first txn above is successful and the second txn encounters a failure, the Dex contract will then need to  
-    deal with the complex issues of checking whether the second txn was successful, whether to resend the second txn,   
-    how to prevent duplicate txns from being sent, and whether to rollback the first txn. During these processes, new  
-    questions will be encountered, such as: Does TokenA allow rollback? If rollback is allowed, what if the rollback  
-    fails because Bob's balance has been transferred preemptively? If that failure happens to be a subnet fail-stop,  
-    then the transaction will be blocked.
+The IC network is free from fail-stop most of the time, but there is still the potential for this type of failures to occur. If the Defi application cannot robustly handle failures and maintain eventual consistency, the consequences could be catastrophic. 
 
 So we need a new framework that requires a concerted effort from both the caller and the callee to provide features that support the execution of distributed transactions. ICTC is based on [Base: An Acid Alternative](https://queue.acm.org/detail.cfm?id=1394128), and seeks eventual consistency of data in cross-canister transactions. Unfortunately, ICTC can only achieve "best-effort delivery" and requires governance compensation or manual compensation mechanisms as a final guarantee to achieve eventual consistency.
 
@@ -53,15 +41,13 @@ ICTC consists of Transaction Manager (TM), Task Actuator (TA), and Transaction C
 Transaction Order: A transaction, including one or more transaction tasks, that requires all tasks to be either fully successful or fully rejected.   
 Transaction Task: A task within a transaction, including local tasks of the caller and remote tasks of other parties involved.
 
-![ICTC](ictc.jpg)
+![ICTC](img/ictc.jpg)
 
 ## Task Actuator
 
-The Task Actuator uses a "best-effort delivery" policy and will definitely return a result (success/failure). Synchronous actuator and asynchronous actuator are supported.
+The Task Actuator uses a "best-effort delivery" policy and will definitely return a result (success/failure). 
 
-![Synchronous Actuator](ictc-syncact.jpg)
-
-![Asynchronous Actuator](ictc-asyncact.jpg)
+![Task Actuator](img/ictc-ta.png)
 
 ## Transaction Manager
 
@@ -69,11 +55,11 @@ The Transaction Manager is used to manage the status of transactions, operate th
 
 **Saga Transaction Manager**
 
-![Saga Transaction Manager](ictc-saga.jpg)
+![Saga Transaction Manager](img/ictc-saga.png)
 
 **2PC Transaction Manager**
 
-![2PC Transaction Manager](ictc-2pc.jpg)
+![2PC Transaction Manager](img/ictc-2pc.png)
 
 ## Transaction Compensator
 
@@ -85,10 +71,32 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 - Synchronous Actuator  (done)
 - Saga Transaction Manager  (done)
 - ICTC Framework Alpha Version  (done)
-- Transaction Actuator (Sync + Async) (done)
+- Transaction Actuator (done)
 - 2PC Transaction Manager (done)
-- ICTC Framework Beta Version (doing)
-- ICTC Framework v1.0
+- ICTC Framework Beta Version (done)
+- ICTC Framework v1.0 (done)
+
+## Reference Docs
+
+[ICTC Reference](./docs/ictc_reference.md)
+
+## Examples
+
+![Example](img/ictc-example.png)
+
+### Example.mo (Saga)
+
+[./examples/Example.mo](./examples/Example.mo)
+
+### Example2PC.mo (2PC)
+
+[./examples/Example2PC.mo](./examples/Example2PC.mo)
+
+## Powering projects
+
+- [ICDex](http://icdex.io) (Orderbook DEX)
+- [ICSwap](http://icswap.io) (AMM DEX)
+- [ICOracle](http://icoracle.io) (Decentralized oracle protocol)
 
 ## Community
 

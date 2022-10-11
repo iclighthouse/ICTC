@@ -14,17 +14,7 @@ IC事务协调器（ICTC）是一个用于IC网络上Defi应用开发的分布�
 - 运行时错误 (runtime error): 如除以0错误。
 - 子网宕机 (fail-stop): 如被调用方(Callee)容器所在子网不可访问。
 
-IC网络在大部分时间中不会出现暂时性故障和子网宕机，但仍然存在发生这类故障的的可能性。如果Defi应用不能健壮地处理故障，保持数据最终一致性，后果可能是灾难性的。可以想象以下场景：
-
-    在一个Dex合约内，Alice、Bob发生TokenA和TokenB的交易，并且需要由Alice以TokenC支付平台交易手续费，如：  
-    TokenA.transferFrom(Alice, Bob, 100);  
-    TokenB.transferFrom(Bob, Alice, 50);  
-    TokenC.transferFrom(Alice, Dex, 1);  
-    以上三个交易组成一个事务，要求要么全部成功，要么全部失败。  
-    如果上面第一笔交易成功，第二笔交易遇到故障，此时Dex合约需要处理检查交易是否成功、是否重新发送交易、如何  
-    防止重复发送交易、是否回滚第一笔交易等复杂问题。在这些处理过程中，还会遇到新的问题，如：TokenA允许回滚  
-    吗？哪怕允许回滚，Bob的余额被抢先转移了而回滚失败怎么办？如果此时遇到的故障恰好是TokenB所在的子网宕机了，  
-    那事务交易就会被阻塞。
+IC网络在大部分时间中不会出现暂时性故障和子网宕机，但仍然存在发生这类故障的的可能性。如果Defi应用不能健壮地处理故障，保持数据最终一致性，后果可能是灾难性的。
 
 所以我们需要一个新的框架，需要调用方和被调用方的共同努力，提供有利于分布式事务执行的特性。ICTC是基于[BASE理论](https://queue.acm.org/detail.cfm?id=1394128)，在跨容器事务中追求数据最终一致性。但遗憾的是，ICTC只能做到“最大努力交付”，还需要治理补偿或者手工补偿机制作为最后保障，才能实现最终一致性。
 
@@ -51,15 +41,13 @@ ICTC由事务管理器（Transaction Manager，TM）、任务执行器（Task Ac
 事务订单（Transaction Order）：指一个具体的事务，包括一个或多个事务任务（Transaction Task），要求所有任务要么全部成功，要么全部拒绝。  
 事务任务（Transaction Task）：指一个事务中的任务，包括调用者本地任务和其他参与方的远程任务。
 
-![ICTC](ictc.jpg)
+![ICTC](img/ictc.jpg)
 
 ## Task Actuator
 
-Task Actuator使用“最大努力交付”（best-effort delivery）策略，并且肯定会返回结果（成功/失败）。ICTC支持同步执行器（Synchronous Actuator）和异步执行器（Asynchronous Actuator）。
+Task Actuator使用“最大努力交付”（best-effort delivery）策略，并且肯定会返回结果（成功/失败）。
 
-![Synchronous Actuator](ictc-syncact.jpg)
-
-![Asynchronous Actuator](ictc-asyncact.jpg)
+![Task Actuator](img/ictc-ta.png)
 
 ## Transaction Manager
 
@@ -67,11 +55,11 @@ Transaction Manager的作用是管理事务状态，操作Actuator，处理异�
 
 **Saga Transaction Manager**
 
-![Saga Transaction Manager](ictc-saga.jpg)
+![Saga Transaction Manager](img/ictc-saga.png)
 
 **2PC Transaction Manager**
 
-![2PC Transaction Manager](ictc-2pc.jpg)
+![2PC Transaction Manager](img/ictc-2pc.png)
 
 ## Transaction Compensator
 
@@ -83,10 +71,32 @@ Transaction Compensator的功能在Transaction Manager中一起实现，其作�
 - Synchronous Actuator  (done)
 - Saga Transaction Manager  (done)
 - ICTC Framework Alpha Version  (done)
-- Transaction Actuator (Sync + Async) (done)
+- Transaction Actuator (done)
 - 2PC Transaction Manager (done)
-- ICTC Framework Beta Version (doing)
-- ICTC Framework v1.0
+- ICTC Framework Beta Version  (done)
+- ICTC Framework v1.0  (done)
+
+## 文档
+
+[ICTC Reference](./docs/ictc_reference.md)
+
+## Examples
+
+![Example](img/ictc-example.png)
+
+### Example.mo (Saga)
+
+[./examples/Example.mo](./examples/Example.mo)
+
+### Example2PC.mo (2PC)
+
+[./examples/Example2PC.mo](./examples/Example2PC.mo)
+
+## 正在采用的项目
+
+- [ICDex](http://icdex.io) (Orderbook DEX)
+- [ICSwap](http://icswap.io) (AMM DEX)
+- [ICOracle](http://icoracle.io) (Decentralized oracle protocol)
 
 ## Community
 

@@ -1,5 +1,5 @@
 /**
- * Module     : TPCTM.mo v0.7
+ * Module     : TPCTM.mo v0.5
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC 2PC Transaction Manager.
@@ -16,6 +16,7 @@ import Iter "mo:base/Iter";
 import List "mo:base/List";
 import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
+import Error "mo:base/Error";
 import TA "./TA";
 
 module {
@@ -69,6 +70,7 @@ module {
         status: Status;
     };
     public type Order = {
+        name: Text;
         tasks: List.List<TPCTask>;
         commits: List.List<TPCCommit>;
         comps: List.List<TPCCompensate>;
@@ -93,13 +95,13 @@ module {
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
-        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, Hash.hash);
+        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, TA.natHash);
         var aliveOrders = List.nil<(Toid, Time.Time)>();
-        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, Hash.hash);
+        var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, TA.natHash);
         var actuator_: ?TA.TA = null;
-        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, Hash.hash);
-        var commitCallbackTemp = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, Hash.hash);
-        var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, Hash.hash);
+        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash);
+        var commitCallbackTemp = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash);
+        var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, TA.natHash);
         private func actuator() : TA.TA {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
@@ -127,17 +129,28 @@ module {
             // task status
             ignore _setTaskStatus(toid, _ttid, _result.0);
             // task callback
+            var callbackDone : Bool = false;
             switch(taskCallback.get(_ttid)){
                 case(?(_taskCallback)){ 
-                    await _taskCallback(_ttid, _task, _result); 
-                    taskCallback.delete(_ttid);
+                    try{
+                        await _taskCallback(_ttid, _task, _result); 
+                        taskCallback.delete(_ttid);
+                        callbackDone := true;
+                    } catch(e){
+                        callbackDone := false;
+                    };
                 };
                 case(_){
                     switch(defaultTaskCallback){
                         case(?(_taskCallback)){
-                            await _taskCallback(_ttid, _task, _result);
+                            try{
+                                await _taskCallback(_ttid, _task, _result);
+                                callbackDone := true;
+                            }catch(e){
+                                callbackDone := false;
+                            };
                         };
-                        case(_){};
+                        case(_){ callbackDone := false; };
                     };
                 };
             };
@@ -157,6 +170,8 @@ module {
                     _removeTATaskByOid(toid);
                 }else if (isClosed and _phaseResult(toid, #Commit) == #No){ 
                     _setStatus(toid, #Blocking);
+                }else if (not(callbackDone)){
+                    _setStatus(toid, #Blocking);
                 }else{ // Doing
                 };
                 // if (_result.0 == #Done and isClosed and Option.get(_orderLastCid(toid), 0) == _ttid){ 
@@ -170,6 +185,8 @@ module {
                     await _orderComplete(toid, #Aborted);
                     _removeTATaskByOid(toid);
                 }else if (isClosed and _phaseResult(toid, #Compensate) == #No){ 
+                    _setStatus(toid, #Blocking);
+                }else if (not(callbackDone)){
                     _setStatus(toid, #Blocking);
                 }else{ // Doing
                 };
@@ -191,6 +208,10 @@ module {
                 case(_){
                     taskEvents.put(toid, [_ttid]);
                 };
+            };
+            //return
+            if (not(callbackDone)){
+                throw Error.reject("Task Callback Error.");
             };
         };
 
@@ -219,12 +240,22 @@ module {
                             return #Yes;
                         };
                         case(#Compensate){
-                            for (task in List.toArray(order.comps).vals()){ 
-                                if (task.status == #Error or task.status == #Unknown){
-                                    return #No;
-                                }else if (task.status == #Todo or task.status == #Doing){
-                                    return #Doing;
+                            // for (task in List.toArray(order.comps).vals()){ 
+                            //     if (task.status == #Error or task.status == #Unknown){
+                            //         return #No;
+                            //     }else if (task.status == #Todo or task.status == #Doing){
+                            //         return #Doing;
+                            //     };
+                            // };
+                            switch(List.pop(order.comps).0){
+                                case(?(task)){
+                                    if (task.status == #Error or task.status == #Unknown){
+                                        return #No;
+                                    }else if (task.status == #Todo or task.status == #Doing){
+                                        return #Doing;
+                                    };
                                 };
+                                case(_){};
                             };
                             return #Yes;
                         };
@@ -373,6 +404,7 @@ module {
                     assert(order.allowPushing == #Opening);
                     let tasks = List.push(_task, order.tasks);
                     let orderNew = {
+                        name = order.name;
                         tasks = tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -397,6 +429,7 @@ module {
                         if (t.ttid == _task.ttid){ _task } else { t };
                     });
                     let orderNew = {
+                        name = order.name;
                         tasks = tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -420,6 +453,7 @@ module {
                 case(?(order)){
                     let tasks = List.filter(order.tasks, func (t:TPCTask): Bool{ t.ttid != _ttid });
                     let orderNew = {
+                        name = order.name;
                         tasks = tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -464,6 +498,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         tasks = order.tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -512,15 +547,23 @@ module {
                     try{ 
                         switch(orderCallback.get(_toid)){
                             case(?(_orderCallback)){ 
-                                await _orderCallback(_toid, _tatus, order.data); 
-                                orderCallback.delete(_toid);
-                                callbackStatus := ?#Done;
+                                try{
+                                    await _orderCallback(_toid, _tatus, order.data); 
+                                    orderCallback.delete(_toid);
+                                    callbackStatus := ?#Done;
+                                }catch(e){
+                                    callbackStatus := ?#Error;
+                                };
                             };
                             case(_){
                                 switch(defaultOrderCallback){
                                     case(?(_orderCallback)){
-                                        await _orderCallback(_toid, _tatus, order.data); 
-                                        callbackStatus := ?#Done;
+                                        try{
+                                            await _orderCallback(_toid, _tatus, order.data); 
+                                            callbackStatus := ?#Done;
+                                        }catch(e){
+                                            callbackStatus := ?#Error;
+                                        };
                                     };
                                     case(_){};
                                 };
@@ -539,6 +582,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         tasks = order.tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -557,6 +601,7 @@ module {
             switch(orders.get(_toid)){
                 case(?(order)){
                     let orderNew = {
+                        name = order.name;
                         tasks = order.tasks;
                         commits = order.commits;
                         comps = order.comps;
@@ -644,6 +689,7 @@ module {
                 case(?(order)){
                     let commits = List.push(commit, order.commits);
                     let orderNew = {
+                        name = order.name;
                         tasks = order.tasks;
                         commits = commits;
                         comps = order.comps;
@@ -708,8 +754,11 @@ module {
         // };
         private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Task, _preTtid: ?[Ttid]) : Tcid{
             if (not(_inOrders(_toid))){ return 0; };
-            //let preTtid = Option.get(_orderLastTtid(_toid, #Commit), 0);
             var preTtids: [Ttid] = [];
+            let preTtid = Option.get(_orderLastTtid(_toid, #Compensate), 0);
+            if (preTtid > 0){
+                preTtids := [preTtid];
+            };
             //if (preTtid > 0){ preTtids := [preTtid]; };
             let task: Task = {
                 callee = _comp.callee;
@@ -734,6 +783,7 @@ module {
                 case(?(order)){
                     let comps = List.push(compTask, order.comps);
                     let orderNew = {
+                        name = order.name;
                         tasks = order.tasks;
                         commits = order.commits;
                         comps = comps;
@@ -818,6 +868,7 @@ module {
                         } else { return t; };
                     });
                     let orderNew : Order = {
+                        name = order.name;
                         tasks = tasks;
                         commits = commits;
                         comps = comps;
@@ -851,11 +902,12 @@ module {
         };
 
         // The following methods are used for transaction order operations.
-        public func create(_data: ?Blob, _callback: ?OrderCallback) : Toid{
+        public func create(_name: Text, _data: ?Blob, _callback: ?OrderCallback) : Toid{
             assert(this != Principal.fromText("aaaaa-aa"));
             let toid = index;
             index += 1;
             let order: Order = {
+                name = _name;
                 tasks = List.nil<TPCTask>();
                 commits = List.nil<TPCCommit>();
                 comps = List.nil<TPCCompensate>();
@@ -1061,11 +1113,11 @@ module {
             autoClearTimeout := _data.autoClearTimeout;
             index := _data.index; 
             firstIndex := _data.firstIndex; 
-            orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, Hash.hash);
+            orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, TA.natHash);
             aliveOrders := _data.aliveOrders;
-            taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, Hash.hash);
-            //taskCallback := TrieMap.fromEntries(_data.taskCallback.vals(), Nat.equal, Hash.hash);
-            //orderCallback := TrieMap.fromEntries(_data.orderCallback.vals(), Nat.equal, Hash.hash);
+            taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, TA.natHash);
+            //taskCallback := TrieMap.fromEntries(_data.taskCallback.vals(), Nat.equal, TA.natHash);
+            //orderCallback := TrieMap.fromEntries(_data.orderCallback.vals(), Nat.equal, TA.natHash);
             actuator().setData(_data.actuator);
         };
         

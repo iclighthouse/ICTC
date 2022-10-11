@@ -1,5 +1,5 @@
 /**
- * Module     : ICTCTest.mo
+ * Module     : ICTC Saga Test
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Github     : https://github.com/iclighthouse/ICTC/
@@ -11,10 +11,10 @@ import Nat "mo:base/Nat";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Option "mo:base/Option";
-import CallType "./src/CallType";
+import CallType "../src/CallType";
 import Principal "mo:base/Principal";
-import TA "./src/TA";
-import SagaTM "./src/SagaTM";
+import TA "../src/TA";
+import SagaTM "../src/SagaTM";
 
 shared(installMsg) actor class Example() = this {
     type CallType = CallType.CallType;
@@ -31,7 +31,7 @@ shared(installMsg) actor class Example() = this {
                 switch(method){
                     case(#foo(count)){
                         var result = foo(count); // Receipt
-                        return (#Done, ?#This(#foo), null);
+                        return (#Done, ?#This(#foo(result)), null);
                     };
                 };
             };
@@ -142,7 +142,7 @@ shared(installMsg) actor class Example() = this {
         // tokenA: transfer contract -> to  1.00000000
         // tokenB: transfer contract -> caller  2.00000000
 
-        let oid = _getSaga().create(#Forward, null, null);
+        let oid = _getSaga().create("swap1", #Forward, null, null);
         var task = _buildTask(null, tokenA_canister, #DRC20(#transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
         let tid1 =_getSaga().push(oid, task, null, null);
         task := _buildTask(null, tokenB_canister, #DRC20(#transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
@@ -181,7 +181,7 @@ shared(installMsg) actor class Example() = this {
         // tokenA: transfer contract -> to  1.00000000  // Block when an exception occurs
         // tokenB: transfer contract -> caller  2.00000000  // Block when an exception occurs
 
-        let oid = _getSaga().create(#Backward, null, null);
+        let oid = _getSaga().create("swap2", #Backward, null, null);
         var task = _buildTask(null, tokenA_canister, #DRC20(#transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
         var comp = _buildTask(null, tokenA_canister, #DRC20(#transfer(caller, valueA, null, null, null)), []);
         let tid1 =_getSaga().push(oid, task, ?comp, null);
@@ -214,7 +214,7 @@ shared(installMsg) actor class Example() = this {
         // tokenA: executeTransfer caller -> to  1.00000000
         // tokenB: executeTransfer to -> caller  2.00000000
 
-        let oid = _getSaga().create(#Backward, null, null);
+        let oid = _getSaga().create("swap3", #Backward, null, null);
         var task = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 100000, null, null, null, null)), []);
         var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
         let tid1 =_getSaga().push(oid, task, ?comp, null);
@@ -362,6 +362,10 @@ shared(installMsg) actor class Example() = this {
         saga.finish(_toid);
         let r = await saga.run(_toid);
         return await _getSaga().complete(_toid, _status);
+    };
+    public shared(msg) func ictc_TTRun() : async Nat{ 
+        // There is no need to call it normally, but can be called if you want to execute tasks in time when a TO is in the Doing state.
+        await _getSaga().getActuator().run();
     };
     /**
     * End: ICTC Transaction Explorer Interface

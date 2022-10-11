@@ -16,7 +16,7 @@ import DIP20 "./lib/DIP20";
 import ICRC1 "./lib/ICRC1";
 import ICTokens "./lib/ICTokens";
 import ICSwap "./lib/ICSwap";
-import DeSwap "./lib/DeSwapTypes";
+import ICDex "./lib/ICDexTypes";
 import Error "mo:base/Error";
 import IC "./lib/IC";
 import Ledger "./lib/Ledger";
@@ -24,7 +24,7 @@ import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
 module {
-    public let Version: Nat = 6;
+    public let Version: Nat = 7;
     public let ICCanister: Text = "aaaaa-aa";
     public let LedgerCanister: Text = "ryjl3-tyaaa-aaaaa-aaaba-cai";
     public let CFCanister: Text = "6nmrm-laaaa-aaaak-aacfq-cai";
@@ -33,6 +33,7 @@ module {
     public type TaskResult = (Status, ?Receipt, ?Err);
     public type LocalCall = (CallType, ?Receipt) -> async (TaskResult);
     public type BlobFill = {#AutoFill; #ManualFill: Blob; };
+    public type NatFill = {#AutoFill; #ManualFill: Nat; };
     /// type ErrorCode = {
     ///   // Fatal error.
     ///   #system_fatal;
@@ -110,6 +111,7 @@ module {
             //#txnQuery : DRC20.TxnQueryRequest;
             #txnRecord : BlobFill;
             //#getCoinSeconds : ?DRC20.Address;
+            #dropAccount: ?DRC20.Sa;
         }; 
         #DIP20: {
             #transfer : (to: Principal, value: Nat);
@@ -130,19 +132,20 @@ module {
             //#heldFirstTime: DRC20.Address;
         };
         #ICSwap: {
-            #swap : (_value: {#token0: ICSwap.Amount; #token1: ICSwap.Amount}, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
-            #swap2 : (_tokenId: Principal, _value: ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
-            #add : (_value0: ?ICSwap.Amount, _value1: ?ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
-            #remove : (_shares: ?ICSwap.Amount, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
-            #claim : (_nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #getDepositAccount : (_account: ICSwap.Address);
+            #swap : (_order: ICSwap.OrderRequest, _slip: ?Nat, _autoWithdraw: ?Bool, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #add : (_value0: ?ICSwap.Amount, _value1: ?ICSwap.Amount, _autoWithdraw: ?Bool, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
+            #remove : (_shares: ?ICSwap.Amount, _autoWithdraw: ?Bool, _nonce: ?ICSwap.Nonce, _sa: ?ICSwap.Sa, _data: ?ICSwap.Data);
             #fallback : (_sa: ?ICSwap.Sa);
-            #txnRecord2 : BlobFill;
+            #withdraw : (_autoWithdraw: ?Bool, _sa: ?ICSwap.Sa);
+            #statusByTxid : BlobFill;
         };
-        #DeSwap: {
-            #create : (_sa: ?DeSwap.Sa); // (TxAccount, Nonce)
-            #trade : (_order: DeSwap.OrderPrice, _orderType: DeSwap.OrderType, _expiration: ?Int, _nonce: ?Nat, _sa: ?DeSwap.Sa, _data: ?DeSwap.Data);
-            #cancel : (_nonce: Nat, _sa: ?DeSwap.Sa);
-            #fallback : (_nonce: Nat, _sa: ?DeSwap.Sa);
+        #ICDex: {
+            #getTxAccount : (_account: ICDex.Address); 
+            #trade : (_order: ICDex.OrderPrice, _orderType: ICDex.OrderType, _expiration: ?Int, _nonce: ?Nat, _sa: ?ICDex.Sa, _data: ?ICDex.Data);
+            #tradeMKT : (_token: Principal, _value: ICDex.Amount, _nonce: ?Nat, _sa: ?ICDex.Sa, _data: ?ICDex.Data);
+            #cancel : (_nonce: Nat, _sa: ?ICDex.Sa);
+            #fallback : (_nonce: Nat, _sa: ?ICDex.Sa);
             #statusByTxid : (BlobFill);
         };
         #This: {
@@ -208,6 +211,7 @@ module {
             //#txnQuery : DRC20.TxnQueryResponse;
             #txnRecord : ?DRC20.TxnRecord;
             //#getCoinSeconds : (DRC20.CoinSeconds, ?DRC20.CoinSeconds);
+            #dropAccount;
         }; 
         #ICTokens: {
             #mint: DRC20.TxnResult;
@@ -228,20 +232,21 @@ module {
             #icrc1_balance_of : Nat;
         };
         #ICSwap: {
+            #getDepositAccount : (ICRC1.Account, ICSwap.Address, ICSwap.Nonce, ICSwap.Txid);
             #swap : ICSwap.TxnResult;
-            #swap2 : ICSwap.TxnResult;
             #add : ICSwap.TxnResult;
             #remove : ICSwap.TxnResult;
-            #claim : ICSwap.TxnResult;
-            #fallback : ();
-            #txnRecord2 : ?ICSwap.TxnRecord;
+            #fallback;
+            #withdraw;
+            #statusByTxid : ICSwap.OrderStatusResponse;
         };
-        #DeSwap: {
-            #create : (Text, Nat);
-            #trade : DeSwap.TradingResult;
+        #ICDex: {
+            #getTxAccount : (ICRC1.Account, Text, ICDex.Nonce, ICDex.Txid); // (ICRC1.Account, TxAccount, Nonce, Txid)
+            #trade : ICDex.TradingResult;
+            #tradeMKT : ICDex.TradingResult;
             #cancel : ();
             #fallback : Bool;
-            #statusByTxid : DeSwap.OrderStatusResponse;
+            #statusByTxid : ICDex.OrderStatusResponse;
         };
         #This: {
             #foo: ();
@@ -696,6 +701,12 @@ module {
                             //         return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                             //     };
                             // };
+                            case(#dropAccount(_sa)){
+                                // do
+                                let f = token.drc20_dropAccount(_sa);
+                                // check & return
+                                return (#Done, ?#DRC20(#dropAccount), null);
+                            };
                             //case(_){ return (#Error, null, ?{code=#future(9902); message="No such method."; });};
                         };
                     };
@@ -852,11 +863,22 @@ module {
                         let swap: ICSwap.Self = actor(calleeId);
                         if (cycles > 0){ Cycles.add(cycles); };
                         switch(method){
-                            case(#swap(_value, _nonce, _sa, _data)){
+                            case(#getDepositAccount(_address)){
+                                var result: ({owner: Principal; subaccount: ?Blob}, Text, ICSwap.Nonce, ICSwap.Txid) = ({owner = Principal.fromText("aaaaa-aa"); subaccount = null}, "", 0, Blob.fromArray([])); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.getDepositAccount(_address);
+                                    // check & return
+                                    return (#Done, ?#ICSwap(#getDepositAccount(result)), null);
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#swap(_order, _slip, _autoWithdraw, _nonce, _sa, _data)){
                                 var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
                                 try{
                                     // do
-                                    result := await swap.swap(_value, _nonce, _sa, _data);
+                                    result := await swap.swap(_order, _slip, _autoWithdraw, _nonce, _sa, _data);
                                     // check & return
                                     switch(result){
                                         case(#ok(res)){ return (#Done, ?#ICSwap(#swap(result)), null); };
@@ -866,25 +888,11 @@ module {
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
-                            case(#swap2(_tokenId, _value, _nonce, _sa, _data)){
+                            case(#add(_value0, _value1, _autoWithdraw, _nonce, _sa, _data)){
                                 var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
                                 try{
                                     // do
-                                    result := await swap.swap2(_tokenId, _value, _nonce, _sa, _data);
-                                    // check & return
-                                    switch(result){
-                                        case(#ok(res)){ return (#Done, ?#ICSwap(#swap2(result)), null); };
-                                        case(#err(e)){ return (#Error, ?#ICSwap(#swap2(result)), ?{code=#future(9903); message="Calling Err."; }); };
-                                    };
-                                } catch (e){
-                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                                };
-                            };
-                            case(#add(_value0, _value1, _nonce, _sa, _data)){
-                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
-                                try{
-                                    // do
-                                    result := await swap.add(_value0, _value1, _nonce, _sa, _data);
+                                    result := await swap.add(_value0, _value1, _autoWithdraw, _nonce, _sa, _data);
                                     // check & return
                                     switch(result){
                                         case(#ok(res)){ return (#Done, ?#ICSwap(#add(result)), null); };
@@ -894,29 +902,15 @@ module {
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
-                            case(#remove(_shares, _nonce, _sa, _data)){
+                            case(#remove(_shares, _autoWithdraw, _nonce, _sa, _data)){
                                 var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
                                 try{
                                     // do
-                                    result := await swap.remove(_shares, _nonce, _sa, _data);
+                                    result := await swap.remove(_shares, _autoWithdraw, _nonce, _sa, _data);
                                     // check & return
                                     switch(result){
                                         case(#ok(res)){ return (#Done, ?#ICSwap(#remove(result)), null); };
                                         case(#err(e)){ return (#Error, ?#ICSwap(#remove(result)), ?{code=#future(9903); message="Calling Err."; }); };
-                                    };
-                                } catch (e){
-                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                                };
-                            };
-                            case(#claim(_nonce, _sa, _data)){
-                                var result: ICSwap.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
-                                try{
-                                    // do
-                                    result := await swap.claim(_nonce, _sa, _data);
-                                    // check & return
-                                    switch(result){
-                                        case(#ok(res)){ return (#Done, ?#ICSwap(#claim(result)), null); };
-                                        case(#err(e)){ return (#Error, ?#ICSwap(#claim(result)), ?{code=#future(9903); message="Calling Err."; }); };
                                     };
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
@@ -932,44 +926,68 @@ module {
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
-                            case(#txnRecord2(txid)){
-                                let txid_ = _getTxid(txid, _receipt);
-                                var result: ?CF.TxnRecord = null; // Receipt
+                            case(#withdraw(_autoWithdraw, _sa)){
                                 try{
                                     // do
-                                    result := await swap.txnRecord2(txid_);
+                                    let result = await swap.withdraw(_autoWithdraw, _sa);
                                     // check & return
-                                    return (#Done, ?#ICSwap(#txnRecord2(result)), null);
+                                    return (#Done, ?#ICSwap(#withdraw(result)), null);
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#statusByTxid(txid)){
+                                let txid_ = _getTxid(txid, _receipt);
+                                var result: ICSwap.OrderStatusResponse = #None; // Receipt
+                                try{
+                                    // do
+                                    result := await swap.statusByTxid(txid_);
+                                    // check & return
+                                    return (#Done, ?#ICSwap(#statusByTxid(result)), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
                         };
                     };
-                    case(#DeSwap(method)){
-                        let swap: DeSwap.Self = actor(calleeId);
+                    case(#ICDex(method)){
+                        let swap: ICDex.Self = actor(calleeId);
                         if (cycles > 0){ Cycles.add(cycles); };
                         switch(method){
-                            case(#create(_sa)){
-                                var result: (Text, Nat) = ("", 0); // Receipt
+                            case(#getTxAccount(_address)){
+                                var result: ({owner: Principal; subaccount: ?Blob}, Text, ICDex.Nonce, ICDex.Txid) = ({owner = Principal.fromText("aaaaa-aa"); subaccount = null}, "", 0, Blob.fromArray([])); // Receipt
                                 try{
                                     // do
-                                    result := await swap.create(_sa);
+                                    result := await swap.getTxAccount(_address);
                                     // check & return
-                                    return (#Done, ?#DeSwap(#create(result)), null);
+                                    return (#Done, ?#ICDex(#getTxAccount(result)), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
                             case(#trade(_order, _orderType, _expiration, _nonce, _sa, _data)){
-                                var result: DeSwap.TradingResult = #err({code=#UndefinedError; message="No call."}); // Receipt
+                                var result: ICDex.TradingResult = #err({code=#UndefinedError; message="No call."}); // Receipt
                                 try{
                                     // do
                                     result := await swap.trade(_order, _orderType, _expiration, _nonce, _sa, _data);
                                     // check & return
                                     switch(result){
-                                        case(#ok(res)){ return (#Done, ?#DeSwap(#trade(result)), null); };
-                                        case(#err(e)){ return (#Error, ?#DeSwap(#trade(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                        case(#ok(res)){ return (#Done, ?#ICDex(#trade(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICDex(#trade(result)), ?{code=#future(9903); message="Calling Err."; }); };
+                                    };
+                                } catch (e){
+                                    return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+                                };
+                            };
+                            case(#tradeMKT(_token, _value, _nonce, _sa, _data)){
+                                var result: ICDex.TradingResult = #err({code=#UndefinedError; message="No call."}); // Receipt
+                                try{
+                                    // do
+                                    result := await swap.tradeMKT(_token, _value, _nonce, _sa, _data);
+                                    // check & return
+                                    switch(result){
+                                        case(#ok(res)){ return (#Done, ?#ICDex(#tradeMKT(result)), null); };
+                                        case(#err(e)){ return (#Error, ?#ICDex(#tradeMKT(result)), ?{code=#future(9903); message="Calling Err."; }); };
                                     };
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
@@ -980,7 +998,7 @@ module {
                                     // do
                                     await swap.cancel(_nonce, _sa);
                                     // check & return
-                                    return (#Done, ?#DeSwap(#cancel), null);
+                                    return (#Done, ?#ICDex(#cancel), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
@@ -991,19 +1009,19 @@ module {
                                     // do
                                     result := await swap.fallback(_nonce, _sa);
                                     // check & return
-                                    return (#Done, ?#DeSwap(#fallback(result)), null);
+                                    return (#Done, ?#ICDex(#fallback(result)), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };
                             };
                             case(#statusByTxid(txid)){
                                 let txid_ = _getTxid(txid, _receipt);
-                                var result: DeSwap.OrderStatusResponse = #None; // Receipt
+                                var result: ICDex.OrderStatusResponse = #None; // Receipt
                                 try{
                                     // do
                                     result := await swap.statusByTxid(txid_);
                                     // check & return
-                                    return (#Done, ?#DeSwap(#statusByTxid(result)), null);
+                                    return (#Done, ?#ICDex(#statusByTxid(result)), null);
                                 } catch (e){
                                     return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                                 };

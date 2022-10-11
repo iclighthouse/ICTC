@@ -21,7 +21,11 @@ module {
   public type Nonce = Nat;
   public type Data = Blob;
   public type Shares = Nat;
-  public type TokenType = { #Cycles; #Icp;#Token: Principal; };
+  public type TokenType = {
+      #Cycles;
+      #Icp;
+      #Token: Principal;
+  };
   public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #icrc1; #other: Text; };
   public type OperationType = {
       #AddLiquidity;
@@ -39,7 +43,7 @@ module {
       #Burn: Shares;
       #NoChange;
   };
-  public type TxnRecord = {
+  public type TxnRecordTemp = {
         txid: Txid;
         msgCaller: ?Principal;
         caller: AccountId;
@@ -57,6 +61,28 @@ module {
         nonce: Nonce;
         orderType: { #AMM; #OrderBook; };
         details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange;}];
+        data: ?Data;
+    };
+  public type TxnRecord = {
+        txid: Txid;
+        msgCaller: ?Principal;
+        caller: AccountId;
+        operation: OperationType;
+        account: AccountId;
+        cyclesWallet: ?CyclesWallet;
+        token0: TokenType;
+        token1: TokenType;
+        fee: {token0Fee: Nat; token1Fee: Nat; };
+        shares: ShareChange;
+        time: Time.Time;
+        index: Nat;
+        nonce: Nonce;
+        order: {token0Value: ?BalanceChange; token1Value: ?BalanceChange;};
+        orderMode: { #AMM; #OrderBook; };
+        orderType: ?{ #LMT; #FOK; #FAK; #MKT; };
+        filled: {token0Value: BalanceChange; token1Value: BalanceChange;};
+        details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange; time: Time.Time;}];
+        status: {#Failed; #Pending; #Completed;};
         data: ?Data;
     };
   public type Setting = {

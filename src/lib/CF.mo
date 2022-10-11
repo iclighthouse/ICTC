@@ -70,6 +70,26 @@ module {
         priceWeighted: PriceWeighted;
         swapCount: Nat64;
     };
+    public type Vol2 = {
+        value0: Nat;
+        value1: Nat; 
+    };
+    public type PriceWeighted2 = {
+        token0TimeWeighted: Nat;
+        token1TimeWeighted: Nat;
+        updateTime: Timestamp; 
+    };
+    public type Liquidity2 = {
+        value0: Nat;
+        value1: Nat;
+        shares: Shares;
+        shareWeighted: ShareWeighted;
+        unitValue: (value0: Nat, value1: Nat);
+        vol: Vol2;
+        priceWeighted: PriceWeighted2;
+        swapCount: Nat64;
+    };
+
     public type FeeStatus = {
         fee: Float;
         cumulFee: {
@@ -150,15 +170,17 @@ module {
         cyclesWallet: ?CyclesWallet;
         token0: TokenType;
         token1: TokenType;
-        token0Value: BalanceChange;
-        token1Value: BalanceChange;
         fee: {token0Fee: Nat; token1Fee: Nat; };
         shares: ShareChange;
         time: Time.Time;
         index: Nat;
         nonce: Nonce;
-        orderType: { #AMM; #OrderBook; };
-        details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange;}];
+        order: {token0Value: ?BalanceChange; token1Value: ?BalanceChange;};
+        orderMode: { #AMM; #OrderBook; };
+        orderType: ?{ #LMT; #FOK; #FAK; #MKT; };
+        filled: {token0Value: BalanceChange; token1Value: BalanceChange;};
+        details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange; time: Time.Time;}];
+        status: {#Failed; #Pending; #Completed;};
         data: ?Data;
     };
     public type TxnResult = Result.Result<{   //<#ok, #err> 
@@ -192,6 +214,7 @@ module {
     getEvents : shared query ?Address -> async [TxnRecord];
     lastTxids : shared query ?Address -> async [Txid];
     liquidity : shared query ?Address -> async Liquidity;
+    liquidity2 : shared query ?Address -> async Liquidity2;
     lpRewards : shared query Address -> async { cycles: Nat; icp: Nat; };
     txnRecord : shared query Txid -> async ?TxnRecord;
     txnRecord2 : shared Txid -> async ?TxnRecord;

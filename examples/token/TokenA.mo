@@ -13,7 +13,7 @@ import Binary "./lib/Binary";
 import Blob "mo:base/Blob";
 import Cycles "mo:base/ExperimentalCycles";
 import CyclesWallet "./sys/CyclesWallet";
-import DRC202 "./lib/DRC202";
+import DRC202 "./lib/DRC202Types";
 import Deque "mo:base/Deque";
 import Trie "mo:base/Trie";
 import Hex "./lib/Hex";
@@ -410,7 +410,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         switch(Trie.get(lockedTxns_, keyb(_a), Blob.equal)){
             case(?(arr)){
                 var txids: [Txid] = arr;
-                txids := Array.append([_txid], txids);
+                txids := AID.arrayAppend([_txid], txids);
                 lockedTxns_ := Trie.put(lockedTxns_, keyb(_a), Blob.equal, txids).0;
             };
             case(_){
@@ -750,7 +750,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                         var as: [AccountId] = [from, to];
                         if (_isAllowance and spendValue > 0){
                             _setAllowance(from, caller, allowed - spendValue);
-                            as := Array.append(as, [caller]);
+                            as := AID.arrayAppend(as, [caller]);
                         };
                         _pushLastTxn(as, txid); 
                         _pushMessages(as, #onTransfer, txid);
@@ -759,7 +759,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                         ignore _mint(to, value);
                         var as: [AccountId] = [to];
                         _pushLastTxn(as, txid); 
-                        as := Array.append(as, [caller]);
+                        as := AID.arrayAppend(as, [caller]);
                         _pushMessages(as, #onTransfer, txid);
                         gas := #noFee;
                     };
@@ -773,7 +773,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                         var as: [AccountId] = [from];
                         if (_isAllowance and spendValue > 0){
                             _setAllowance(from, caller, allowed - spendValue);
-                            as := Array.append(as, [caller]);
+                            as := AID.arrayAppend(as, [caller]);
                         };
                         _pushLastTxn(as, txid); 
                         _pushMessages(as, #onTransfer, txid);
@@ -791,7 +791,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                 var as: [AccountId] = [from, to, operation.decider];
                 if (_isAllowance and spendValue > 0){
                     _setAllowance(from, caller, allowed - spendValue);
-                    as := Array.append(as, [caller]);
+                    as := AID.arrayAppend(as, [caller]);
                 };
                 _pushLastTxn(as, txid);
                 _pushMessages(as, #onLock, txid);
@@ -874,7 +874,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
     private func _pushTop100(_a: AccountId, _balance: Nat) : (){ 
         var top100 = Array.filter(top100_, func (v:(AccountId,Nat)): Bool { v.0 != _a });
         if (_balance >= top100Threshold){
-            top100 := Array.append(top100, [(_a, _balance)]);
+            top100 := AID.arrayAppend(top100, [(_a, _balance)]);
             top100 := Array.sort(top100, func (v1:(AccountId,Nat), v2:(AccountId,Nat)):Order.Order {
                 //reverse order
                 if (v1.1 > v2.1){
@@ -1299,7 +1299,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                                 };
                                 case(_){};
                             };
-                            txns := Array.append(txns, [record]);
+                            txns := AID.arrayAppend(txns, [record]);
                         };
                         case(_){};
                     };
@@ -1485,7 +1485,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
     public shared(msg) func ictokens_snapshot(_threshold: Amount) : async Bool{  //ict
         assert(_onlyOwner(msg.caller));
         let balancesTrie = Trie.filter(balances, func (key:AccountId, value:Nat):Bool{ value >= _threshold });
-        balancesSnapshot := Array.append(balancesSnapshot, [(balancesTrie, Time.now())]);
+        balancesSnapshot := AID.arrayAppend(balancesSnapshot, [(balancesTrie, Time.now())]);
         return true;
     };
     public shared(msg) func ictokens_clearSnapshot() : async Bool{  //ict
@@ -1507,11 +1507,6 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         let (balances_,snapTime) = balancesSnapshot[_snap];
         let account = _getAccountId(_owner);
         return (snapTime, Trie.get(balances_, keyb(account), Blob.equal));
-    };
-
-    /// canister memory
-    public query func getMemory() : async (Nat,Nat,Nat,Nat32){
-        return (Prim.rts_memory_size(), Prim.rts_heap_size(), Prim.rts_total_allocation(),Prim.stableMemorySize());
     };
 
     // DRC207 ICMonitor

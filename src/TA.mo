@@ -1,5 +1,5 @@
 /**
- * Module     : TA.mo v0.7
+ * Module     : TA.mo v0.5
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
@@ -21,11 +21,13 @@ import Time "mo:base/Time";
 import TrieMap "mo:base/TrieMap";
 import TATypes "TATypes";
 import TaskHash "TaskHash";
+import Nat64 "mo:base/Nat64";
+import Binary "./lib/Binary";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 // As motoko does not currently support features such as candid encode/decode, call_raw and reflection, a temporary solution is used.
 module {
-    public let Version: Nat = 7;
+    public let Version: Nat = 6;
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
@@ -60,6 +62,10 @@ module {
             buffer.add(t);
         };
         return buffer.toArray();
+    };
+    // replace Hash.hash (Warning: Incompatible)
+    public func natHash(n : Nat) : Hash.Hash{
+        return Blob.hash(Blob.fromArray(Binary.BigEndian.fromNat64(Nat64.fromIntWrap(n))));
     };
     public func getTM<V>(_tm: TrieMap.TrieMap<Nat, V>, _index: Nat, _firstIndex: Nat, _page: Nat, _size: Nat) : {data: [(Nat, V)]; totalPage: Nat; total: Nat}{
         let length = _tm.size();
@@ -98,13 +104,14 @@ module {
     
     /// limitNum: The actuator runs `limitNum` tasks at once.
     public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, taskCallback: ?Callback) {
+
         var tasks = Deque.empty<(Ttid, Task)>();
         var index : Nat = 1;
         var firstIndex : Nat = 1;
-        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent> (Nat.equal, Hash.hash);
+        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent> (Nat.equal, natHash);
         var errIndex : Nat = 1;
         var firstErrIndex : Nat = 1;
-        var errorLogs = TrieMap.TrieMap<Nat, ErrorLog> (Nat.equal, Hash.hash);
+        var errorLogs = TrieMap.TrieMap<Nat, ErrorLog> (Nat.equal, natHash);
         var callees = TrieMap.TrieMap<Callee, CalleeStatus> (Principal.equal, Principal.hash);
         // var receiption : ?CallType.Receipt = null;
         // public func getReceiption() : ?CallType.Receipt{
@@ -479,8 +486,8 @@ module {
         };
         public func setData(_data: Data) : (){
             tasks := _data.tasks;
-            taskLogs := TrieMap.fromEntries(_data.taskLogs.vals(), Nat.equal, Hash.hash);
-            errorLogs := TrieMap.fromEntries(_data.errorLogs.vals(), Nat.equal, Hash.hash);
+            taskLogs := TrieMap.fromEntries(_data.taskLogs.vals(), Nat.equal, natHash);
+            errorLogs := TrieMap.fromEntries(_data.errorLogs.vals(), Nat.equal, natHash);
             callees := TrieMap.fromEntries(_data.callees.vals(), Principal.equal, Principal.hash);
             index := _data.index;
             firstIndex := _data.firstIndex;
