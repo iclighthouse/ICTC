@@ -153,7 +153,7 @@ module {
         time: Time.Time;
     };
     public type Side = { #Token0ToToken1; #Token1ToToken0; };
-    public type KBar = {kid: Nat; open: Nat; high: Nat; low: Nat; close: Nat; vol: Nat; updatedTs: Timestamp};
+    public type KBar = {kid: Nat; open: Nat; high: Nat; low: Nat; close: Nat; vol: Vol; updatedTs: Timestamp};
     public type TrieList<K, V> = {data: [(K, V)]; total: Nat; totalPage: Nat; };
     public type Self = actor {
         name : shared query () -> async Text;
@@ -187,5 +187,6 @@ module {
             token0: TokenInfo;
             token1: TokenInfo;
         };
+        stats : shared query() -> async {price:Float; change24h:Float; vol24h:Vol; totalVol:Vol};
     }
 }

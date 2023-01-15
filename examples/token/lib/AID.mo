@@ -42,7 +42,7 @@ module {
         for (t in b.vals()){
             buffer.add(t);
         };
-        return buffer.toArray();
+        return Buffer.toArray(buffer);
     };
     public func slice<T>(a: [T], from: Nat, to: ?Nat): [T]{
         let len = a.size();

@@ -38,7 +38,7 @@ module {
         for (t in b.vals()){
             buffer.add(t);
         };
-        return buffer.toArray();
+        return Buffer.toArray(buffer);
     };
 
     // Checks whether two hex strings are equal.

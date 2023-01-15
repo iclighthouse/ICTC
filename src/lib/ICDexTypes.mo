@@ -8,6 +8,7 @@
 
 import Time "mo:base/Time";
 import Result "mo:base/Result";
+import List "mo:base/List";
 import DRC205 "DRC205Types";
 
 module {
@@ -43,10 +44,9 @@ module {
         #NoChange;
     };
     public type OrderSide = { #Sell; #Buy; };
-    public type OrderType = { #LMT; #FOK; #FAK; #MKT; }; // #MKT; 
+    public type OrderType = { #LMT; #FOK; #FAK; #MKT; }; // #STOP; 
     public type OrderPrice = { quantity: {#Buy: (quantity: Nat, amount: Nat); #Sell: Nat; }; price: Nat; };
     public type OrderFilled = {counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange; time: Time.Time };
-
     public type TradingStatus = { #Todo; #Pending; #Closed; #Cancelled; };
     public type TradingOrder = {
         account: AccountId;
@@ -62,7 +62,7 @@ module {
         filled: [OrderFilled];
         status: TradingStatus;
         gas : { gas0: Nat; gas1: Nat; };
-        fee : { fee0: Nat; fee1: Nat; };
+        fee : { fee0: Int; fee1: Int; };
         index : Nat;
         nonce: Nat;
         data: ?Blob;
@@ -81,12 +81,20 @@ module {
         ICP_FEE: IcpE8s; // 10000 E8s
         TRADING_FEE: Nat; // /1000000   value 5000 means 0.5%
         MAKER_BONUS_RATE: Nat; // /100  value 50  means 50%
+        MAX_TPS: Nat; 
+        MAX_PENDINGS: Nat;
+        STORAGE_INTERVAL: Nat; // seconds
+        ICTC_RUN_INTERVAL: Nat; // seconds
     };
     public type DexConfig = {
         UNIT_SIZE: ?Nat;
         ICP_FEE: ?IcpE8s;
         TRADING_FEE: ?Nat;
         MAKER_BONUS_RATE: ?Nat;
+        MAX_TPS: ?Nat; 
+        MAX_PENDINGS: ?Nat;
+        STORAGE_INTERVAL: ?Nat; // seconds
+        ICTC_RUN_INTERVAL: ?Nat; // seconds
     };
     public type Vol = { value0: Amount; value1: Amount; };
     public type PriceWeighted = {
@@ -128,7 +136,7 @@ module {
         unitSize: Nat64;
         owner: ?Principal;
     };
-    public type KBar = {kid: Nat; open: Nat; high: Nat; low: Nat; close: Nat; vol: Nat; updatedTs: Timestamp};
+    public type KBar = {kid: Nat; open: Nat; high: Nat; low: Nat; close: Nat; vol: Vol; updatedTs: Timestamp};
     public type TrieList<K, V> = {data: [(K, V)]; total: Nat; totalPage: Nat; };
     public type Self = actor {
         //create : shared (_sa: ?Sa) -> async (Text, Nat); // (TxAccount, Nonce)
@@ -150,6 +158,7 @@ module {
         token0 : shared query () -> async (DRC205.TokenType, ?TokenStd);
         token1 : shared query () -> async (DRC205.TokenType, ?TokenStd);
         count : shared query (_account: ?Address) -> async Nat;
+        fee : shared query () -> async {maker: { buy: Float; sell: Float }; taker: { buy: Float; sell: Float }};
         feeStatus : shared query () -> async FeeStatus;
         liquidity : shared query (_account: ?Address) -> async Liquidity;
         getQuotes : shared query (_ki: Nat) -> async [KBar];
@@ -164,6 +173,8 @@ module {
             token0: TokenInfo;
             token1: TokenInfo;
         };
+        stats : shared query() -> async {price:Float; change24h:Float; vol24h:Vol; totalVol:Vol};
+        getConfig : shared query() -> async DexSetting;
     };
     public type DRC205 = actor {
         drc205_canisterId : shared query () -> async Principal;

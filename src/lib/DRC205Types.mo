@@ -21,12 +21,13 @@ module {
   public type Nonce = Nat;
   public type Data = Blob;
   public type Shares = Nat;
+  public type Status = {#Failed; #Pending; #Completed; #PartiallyCompletedAndCancelled; #Cancelled;};
   public type TokenType = {
       #Cycles;
       #Icp;
       #Token: Principal;
   };
-  public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #icrc1; #other: Text; };
+  public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #icrc1; #ledger; #ext; #other: Text; };
   public type OperationType = {
       #AddLiquidity;
       #RemoveLiquidity;
@@ -72,7 +73,7 @@ module {
         cyclesWallet: ?CyclesWallet;
         token0: TokenType;
         token1: TokenType;
-        fee: {token0Fee: Nat; token1Fee: Nat; };
+        fee: {token0Fee: Int; token1Fee: Int; };
         shares: ShareChange;
         time: Time.Time;
         index: Nat;
@@ -82,7 +83,7 @@ module {
         orderType: ?{ #LMT; #FOK; #FAK; #MKT; };
         filled: {token0Value: BalanceChange; token1Value: BalanceChange;};
         details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange; time: Time.Time;}];
-        status: {#Failed; #Pending; #Completed;};
+        status: Status;
         data: ?Data;
     };
   public type Setting = {
@@ -102,12 +103,18 @@ module {
     version: shared query () -> async Nat8;
     fee : shared query () -> async (cycles: Nat); //cycles
     store : shared (_txn: TxnRecord) -> async (); 
+    storeBatch : shared (_txns: [TxnRecord]) -> async (); 
     storeBytes: shared (_txid: Txid, _data: [Nat8]) -> async (); 
+    storeBytesBatch: shared (_txns: [(_txid: Txid, _data: [Nat8])]) -> async (); 
     bucket : shared query (_app: AppId, _txid: Txid, _step: Nat, _version: ?Nat8) -> async (bucket: ?Principal);
   };
   public type Bucket = actor {
     txnBytes: shared query (_app: AppId, _txid: Txid) -> async ?([Nat8], Time.Time);
+    txnBytesHistory: shared query (_app: AppId, _txid: Txid) -> async [([Nat8], Time.Time)];
     txn: shared query (_app: AppId, _txid: Txid) -> async ?(TxnRecord, Time.Time);
+    txnHistory: shared query (_app: AppId, _txid: Txid) -> async [(TxnRecord, Time.Time)];
+    txnHash: shared query (_app: AppId, _txid: Txid, _index: Nat) -> async ?Text;
+    txnBytesHash: shared query (_app: AppId, _txid: Txid, _index: Nat) -> async ?Text;
   };
   public type Impl = actor {
     drc205_getConfig : shared query () -> async Setting;
@@ -124,7 +131,7 @@ module {
         for (t in b.vals()){
             buffer.add(t);
         };
-        return buffer.toArray();
+        return Buffer.toArray(buffer);
     };
   public func generateTxid(_app: AppId, _caller: AccountId, _nonce: Nat): Txid{
     let appType: [Nat8] = [83:Nat8, 87, 65, 80]; //SWAP

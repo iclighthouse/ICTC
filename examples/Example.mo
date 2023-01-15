@@ -11,6 +11,7 @@ import Nat "mo:base/Nat";
 import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Option "mo:base/Option";
+import Error "mo:base/Error";
 import CallType "../src/CallType";
 import Principal "mo:base/Principal";
 import TA "../src/TA";
@@ -25,7 +26,7 @@ shared(installMsg) actor class Example() = this {
     private func foo(count: Nat) : (){
         x += 100;
     };
-    private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
+    private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : (SagaTM.TaskResult){
         switch(_args){
             case(#This(method)){
                 switch(method){
@@ -38,10 +39,23 @@ shared(installMsg) actor class Example() = this {
             case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
         };
     };
-    private func _taskCallback(_tid: SagaTM.Ttid, _task: SagaTM.Task, _result: SagaTM.TaskResult) : async (){
+    private func _localAsync(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
+        switch(_args){
+            case(#This(method)){
+                switch(method){
+                    case(#foo(count)){
+                        var result = foo(count); // Receipt
+                        return (#Done, ?#This(#foo(result)), null);
+                    };
+                };
+            };
+            case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
+        };
+    };
+    private func _taskCallback(_tid: SagaTM.Ttid, _task: SagaTM.Task, _result: SagaTM.TaskResult) : (){
         taskLogs := TA.arrayAppend(taskLogs, [(_tid, _task, _result)]);
     };
-    private func _orderCallback(_oid: SagaTM.Toid, _status: SagaTM.OrderStatus, _data: ?Blob) : async (){
+    private func _orderCallback(_oid: SagaTM.Toid, _status: SagaTM.OrderStatus, _data: ?Blob) : (){
         orderLogs := TA.arrayAppend(orderLogs, [(_oid, _status)]);
     };
 
@@ -52,7 +66,7 @@ shared(installMsg) actor class Example() = this {
         switch(saga){
             case(?(_saga)){ return _saga };
             case(_){
-                let _saga = SagaTM.SagaTM(Principal.fromActor(this), _local, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
+                let _saga = SagaTM.SagaTM(Principal.fromActor(this), ?_local, ?_localAsync, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
                 saga := ?_saga;
                 return _saga;
             };
@@ -92,7 +106,7 @@ shared(installMsg) actor class Example() = this {
         return (balanceA, balanceB);
     };
     public shared func claimTestTokens(_account: Text) : async (){
-        let act = TA.TA(50, 24*3600*1000000000, Principal.fromActor(this), _local, ?_taskCallback);
+        let act = TA.TA(50, 24*3600*1000000000, Principal.fromActor(this), _local, _localAsync, null, ?_taskCallback);
         var task = _task(tokenA_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)), []);
         let tid1 = act.push(task);
         task := _task(tokenB_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)), []);
@@ -153,7 +167,7 @@ shared(installMsg) actor class Example() = this {
         let tid4 =_getSaga().push(oid, task, null, null);
         task := _buildTask(null, tokenB_canister, #DRC20(#transfer(caller, valueB, null, null, null)), []);
         let tid5 =_getSaga().push(oid, task, null, null);
-        _getSaga().finish(oid);
+        _getSaga().close(oid);
         let res = await _getSaga().run(oid);
         return (oid, res);
     };
@@ -195,7 +209,7 @@ shared(installMsg) actor class Example() = this {
         let tid4 =_getSaga().push(oid, task, null, null);
         task := _buildTask(null, tokenB_canister, #DRC20(#transfer(caller, valueB, null, null, null)), []);
         let tid5 =_getSaga().push(oid, task, null, null);
-        _getSaga().finish(oid);
+        _getSaga().close(oid);
         let res = await _getSaga().run(oid);
         return (oid, res);
     };
@@ -249,7 +263,7 @@ shared(installMsg) actor class Example() = this {
         };
         task := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#ManualFill(txid2), #sendAll, null, null, null, null)), []);
         let tid5 =_getSaga().push(oid, task, null, null);
-        _getSaga().finish(oid);
+        _getSaga().close(oid);
         return (oid, await _getSaga().run(oid));
     };
     
@@ -259,7 +273,7 @@ shared(installMsg) actor class Example() = this {
     * https://cmqwp-uiaaa-aaaaj-aihzq-cai.raw.ic0.app/
     */
     // ICTC: management functions
-    private stable var ictc_admins: [Principal] = [installMsg.caller];
+    private stable var ictc_admins: [Principal] = [];
     private func _onlyIctcAdmin(_caller: Principal) : Bool { 
         return Option.isSome(Array.find(ictc_admins, func (t: Principal): Bool{ t == _caller }));
     }; 
@@ -331,22 +345,29 @@ shared(installMsg) actor class Example() = this {
     };
 
     // Transaction Governance
-    // public shared(msg) func ictc_clearTT() : async (){ // Warning: Execute this method with caution
-    //     assert(_onlyOwner(msg.caller));
+    // public shared(msg) func ictc_clearTTPool() : async (){ // Warning: Execute this method with caution
+    //     assert(_onlyIctcAdmin(msg.caller));
     //     _getSaga().getActuator().clearTasks();
     // };
+    public shared(msg) func ictc_blockTO(_toid: SagaTM.Toid) : async ?SagaTM.Toid{
+        assert(_onlyIctcAdmin(msg.caller));
+        assert(not(_onlyBlocking(_toid)));
+        let saga = _getSaga();
+        return saga.block(_toid);
+    };
     // public shared(msg) func ictc_removeTT(_toid: SagaTM.Toid, _ttid: SagaTM.Ttid) : async ?SagaTM.Ttid{ // Warning: Execute this method with caution
+    //     assert(_onlyIctcAdmin(msg.caller));
     //     assert(_onlyBlocking(_toid));
     //     let saga = _getSaga();
     //     saga.open(_toid);
     //     let ttid = saga.remove(_toid, _ttid);
-    //     saga.finish(_toid);
+    //     saga.close(_toid);
     //     return ttid;
     // };
     public shared(msg) func ictc_appendTT(_businessId: ?Blob, _toid: SagaTM.Toid, _forTtid: ?SagaTM.Ttid, _callee: Principal, _callType: SagaTM.CallType, _preTtids: [SagaTM.Ttid]) : async SagaTM.Ttid{
         // Governance or manual compensation (operation allowed only when a transaction order is in blocking status).
-        // assert(_onlyIctcAdmin(msg.caller));
-        assert(_onlyBlocking(_toid)); 
+        assert(_onlyIctcAdmin(msg.caller));
+        assert(_onlyBlocking(_toid));
         let saga = _getSaga();
         saga.open(_toid);
         let taskRequest = _buildTask(_businessId, _callee, _callType, _preTtids);
@@ -354,18 +375,84 @@ shared(installMsg) actor class Example() = this {
         let ttid = saga.appendComp(_toid, Option.get(_forTtid, 0), taskRequest, null);
         return ttid;
     };
+    /// Try the task again
+    public shared(msg) func ictc_redoTT(_toid: SagaTM.Toid, _ttid: SagaTM.Ttid) : async ?SagaTM.Ttid{
+        // Warning: proceed with caution!
+        assert(_onlyIctcAdmin(msg.caller));
+        let saga = _getSaga();
+        let ttid = saga.redo(_toid, _ttid);
+        try{
+            let r = await saga.run(_toid);
+        }catch(e){
+            throw Error.reject("430: ICTC error: "# Error.message(e)); 
+        };
+        return ttid;
+    };
+    /// set status of pending task
+    public shared(msg) func ictc_doneTT(_toid: SagaTM.Toid, _ttid: SagaTM.Ttid, _toCallback: Bool) : async ?SagaTM.Ttid{
+        // Warning: proceed with caution!
+        assert(_onlyIctcAdmin(msg.caller));
+        let saga = _getSaga();
+        try{
+            let ttid = await saga.taskDone(_toid, _ttid, _toCallback);
+            return ttid;
+        }catch(e){
+            throw Error.reject("420: internal call error: "# Error.message(e)); 
+        };
+    };
+    /// set status of pending order
+    public shared(msg) func ictc_doneTO(_toid: SagaTM.Toid, _status: SagaTM.OrderStatus, _toCallback: Bool) : async Bool{
+        // Warning: proceed with caution!
+        assert(_onlyIctcAdmin(msg.caller));
+        let saga = _getSaga();
+        saga.close(_toid);
+        try{
+            let res = await saga.done(_toid, _status, _toCallback);
+            return res;
+        }catch(e){
+            throw Error.reject("420: internal call error: "# Error.message(e)); 
+        };
+    };
+    /// Complete blocking order
     public shared(msg) func ictc_completeTO(_toid: SagaTM.Toid, _status: SagaTM.OrderStatus) : async Bool{
         // After governance or manual compensations, this method needs to be called to complete the transaction order.
-        // assert(_onlyIctcAdmin(msg.caller));
+        assert(_onlyIctcAdmin(msg.caller));
         assert(_onlyBlocking(_toid));
         let saga = _getSaga();
-        saga.finish(_toid);
-        let r = await saga.run(_toid);
-        return await _getSaga().complete(_toid, _status);
+        saga.close(_toid);
+        try{
+            let r = await saga.run(_toid);
+        }catch(e){
+            throw Error.reject("430: ICTC error: "# Error.message(e)); 
+        };
+        try{
+            let r = await _getSaga().complete(_toid, _status);
+            return r;
+        }catch(e){
+            throw Error.reject("430: ICTC error: "# Error.message(e)); 
+        };
     };
-    public shared(msg) func ictc_TTRun() : async Nat{ 
+    public shared(msg) func ictc_runTO(_toid: SagaTM.Toid) : async ?SagaTM.OrderStatus{
+        assert(_onlyIctcAdmin(msg.caller));
+        let saga = _getSaga();
+        saga.close(_toid);
+        try{
+            let r = await saga.run(_toid);
+            return r;
+        }catch(e){
+            throw Error.reject("430: ICTC error: "# Error.message(e)); 
+        };
+    };
+    public shared(msg) func ictc_runTT() : async Bool{ 
         // There is no need to call it normally, but can be called if you want to execute tasks in time when a TO is in the Doing state.
-        await _getSaga().getActuator().run();
+        assert(_onlyIctcAdmin(msg.caller));
+        let saga = _getSaga();
+        try{
+            let r = await saga.run(0);
+        }catch(e){
+            throw Error.reject("430: ICTC error: "# Error.message(e)); 
+        };
+        return true;
     };
     /**
     * End: ICTC Transaction Explorer Interface
@@ -375,27 +462,21 @@ shared(installMsg) actor class Example() = this {
 
     // upgrade
     /// Saga
-    private stable var __sagaData: [SagaTM.Data] = [];
+    private stable var __sagaDataNew: ?SagaTM.Data = null;
     system func preupgrade() {
-        __sagaData := TA.arrayAppend(__sagaData, [_getSaga().getData()]);
+        let data = _getSaga().getData();
+        __sagaDataNew := ?data;
+        // assert(List.size(data.actuator.tasks.0) == 0 and List.size(data.actuator.tasks.1) == 0);
     };
     system func postupgrade() {
-        if (__sagaData.size() > 0){
-            _getSaga().setData(__sagaData[0]);
-            __sagaData := [];
+        switch(__sagaDataNew){
+            case(?(data)){
+                _getSaga().setData(data);
+                __sagaDataNew := null;
+            };
+            case(_){};
         };
     };
-    /// 2PC
-    // private stable var __tpcData: [TPCTM.Data] = [];
-    // system func preupgrade() {
-    //     __tpcData := TA.arrayAppend(__tpcData, [_getTPC().getData()]);
-    // };
-    // system func postupgrade() {
-    //     if (__tpcData.size() > 0){
-    //         _getTPC().setData(__tpcData[0]);
-    //         __tpcData := [];
-    //     };
-    // };
 
     
 };

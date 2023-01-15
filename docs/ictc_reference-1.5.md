@@ -1,10 +1,8 @@
 # ICTC Reference
 
-Latest: [ICTC v1.5 Reference](ictc_reference-1.5.md)
-
 ## Quickstart
 
-### ICTC(Saga) - Common implementations
+### ICTC v1.5 (Saga) - Common implementations
 
 - Imports SagaTM Module.
 ```
@@ -13,17 +11,29 @@ import SagaTM "./src/SagaTM";
 
 - (Optional) Implements callback functions for transaction orders and transaction tasks.
 ```
-private func _taskCallback(_tid: SagaTM.Ttid, _task: SagaTM.Task, _result: SagaTM.TaskResult) : async (){
+private func _taskCallback(_tid: SagaTM.Ttid, _task: SagaTM.Task, _result: SagaTM.TaskResult) : (){
     // do something
 };
-private func _orderCallback(_oid: SagaTM.Toid, _status: SagaTM.OrderStatus, _data: ?Blob) : async (){
+private func _orderCallback(_oid: SagaTM.Toid, _status: SagaTM.OrderStatus, _data: ?Blob) : (){
     // do something
 };
 ```
 
 - Implements local tasks. (Each task needs to be internally atomic or able to maintain data consistency.)
 ```
-private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
+private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : (SagaTM.TaskResult){
+    switch(_args){
+        case(#This(method)){
+            // switch(method){
+            //     case(#local_method_name(args)){
+            //         // ...
+            //     };
+            // };
+        };
+        case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
+    };
+};
+private func _localAsync(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
     switch(_args){
         case(#This(method)){
             // switch(method){
@@ -36,33 +46,13 @@ private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (
     };
 };
 ```
-Example:
-```
-private var x : Nat = 0;
-private func foo(count: Nat) : (){
-    x += 100;
-};
-private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
-    switch(_args){
-        case(#This(method)){
-            switch(method){
-                case(#foo(count)){
-                    var result = foo(count); // Receipt
-                    return (#Done, ?#This(#foo(result)), null);
-                };
-            };
-        };
-        case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
-    };
-};
-```
 
 - (Optional) Custom CallType.mo file.
 Modify the CallType.mo file according to your local tasks and the external tasks you need to call.
 
 - Creates a saga object.
 ```
-let saga = SagaTM.SagaTM(Principal.fromActor(this), _local, ?_taskCallback, ?_orderCallback);
+let saga = SagaTM.SagaTM(Principal.fromActor(this), ?_local, ?_localAsync, ?_taskCallback, ?_orderCallback);
 ```
 
 - Creates a transaction order. (Supports `Forward` and `Backward` modes)
@@ -86,25 +76,30 @@ let tid1 = saga.push(oid, task, null, null);
 
 - Executes the transaction order.
 ```
-saga.finish(oid);
+saga.close(oid);
 let res = await saga.run(oid);
 ```
 
 - Implements the upgrade function for SagaTM.
 ```
-private stable var __sagaData: [SagaTM.Data] = [];
+private stable var __sagaDataNew: ?SagaTM.Data = null;
 system func preupgrade() {
-    __sagaData := TA.arrayAppend(__sagaData, [_getSaga().getData()]);
+    let data = _getSaga().getData();
+    __sagaDataNew := ?data;
+    // assert(List.size(data.actuator.tasks.0) == 0 and List.size(data.actuator.tasks.1) == 0);
 };
 system func postupgrade() {
-    if (__sagaData.size() > 0){
-        _getSaga().setData(__sagaData[0]);
-        __sagaData := [];
+    switch(__sagaDataNew){
+        case(?(data)){
+            _getSaga().setData(data);
+            __sagaDataNew := null;
+        };
+        case(_){};
     };
 };
 ```
 
-### ICTC(2PC)
+### ICTC v1.5 (2PC)
 
 - Imports TPCTM Module.
 ```
@@ -113,16 +108,28 @@ import TPCTM "./src/TPCTM";
 
 - (Optional) Implements callback functions for transaction orders and transaction tasks.
 ```
-private func _taskCallback(_tid: TPCTM.Ttid, _task: TPCTM.Task, _result: TPCTM.TaskResult) : async (){
+private func _taskCallback(_tid: TPCTM.Ttid, _task: TPCTM.Task, _result: TPCTM.TaskResult) : (){
     // do something
 };
-private func _orderCallback(_oid: TPCTM.Toid, _status: TPCTM.OrderStatus, _data: ?Blob) : async (){
+private func _orderCallback(_oid: TPCTM.Toid, _status: TPCTM.OrderStatus, _data: ?Blob) : (){
     // do something
 };
 ```
 
 - Implements local tasks. (Each task needs to be internally atomic or able to maintain data consistency.)
 ```
+private func _local(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : (TPCTM.TaskResult){
+    switch(_args){
+        case(#This(method)){
+            // switch(method){
+            //     case(#local_method_name(args)){
+            //         // ...
+            //     };
+            // };
+        };
+        case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
+    };
+};
 private func _local(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : async (TPCTM.TaskResult){
     switch(_args){
         case(#This(method)){
@@ -136,33 +143,13 @@ private func _local(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : async (TP
     };
 };
 ```
-Example:
-```
-private var x : Nat = 0;
-private func foo(count: Nat) : (){
-    x += 100;
-};
-private func _local(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : async (TPCTM.TaskResult){
-    switch(_args){
-        case(#This(method)){
-            switch(method){
-                case(#foo(count)){
-                    var result = foo(count); // Receipt
-                    return (#Done, ?#This(#foo(result)), null);
-                };
-            };
-        };
-        case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
-    };
-};
-```
 
 - (Optional) Custom CallType.mo file.
 Modify the CallType.mo file according to your local tasks and the external tasks you need to call.
 
 - Creates a tpc object.
 ```
-let tpc = TPCTM.TPCTM(Principal.fromActor(this), _local, ?_taskCallback, ?_orderCallback);
+let tpc = TPCTM.TPCTM(Principal.fromActor(this), ?_local, ?_localAsync, ?_taskCallback, ?_orderCallback);
 ```
 
 - Creates a transaction order. 
@@ -195,20 +182,25 @@ let tid1 = tpc.push(oid, prepare, commit, null, null, null);
 
 - Executes the transaction order.
 ```
-tpc.finish(oid);
+tpc.close(oid);
 let res = await tpc.run(oid);
 ```
 
 - Implements the upgrade function for TPCTM.
 ```
-private stable var __tpcData: [TPCTM.Data] = [];
+private stable var __tpcDataNew: ?TPCTM.Data = null;
 system func preupgrade() {
-    __tpcData := TA.arrayAppend(__tpcData, [_getTPC().getData()]);
+    let data = _getTPC().getData();
+    __tpcDataNew := ?data;
+    // assert(List.size(data.actuator.tasks.0) == 0 and List.size(data.actuator.tasks.1) == 0);
 };
 system func postupgrade() {
-    if (__tpcData.size() > 0){
-        _getTPC().setData(__tpcData[0]);
-        __tpcData := [];
+    switch(__tpcDataNew){
+        case(?(data)){
+            _getTPC().setData(data);
+            __tpcDataNew := null;
+        };
+        case(_){};
     };
 };
 ```
@@ -222,11 +214,17 @@ public func create (_name: Text, _compStrategy: CompStrategy, _data: ?Blob, _cal
 
 public func push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid
 
+public func taskDone(_toid: Toid, _ttid: Ttid, _toCallback: Bool) : async ?Ttid
+
+public func redo(_toid: Toid, _ttid: Ttid) : ?Ttid
+
 public func open(_toid: Toid) : ()
 
-public func finish(_toid: Toid) : ()
+public func close(_toid: Toid) : ()
 
 public func run(_toid: Toid) : async ?OrderStatus
+
+public func asyncMessageSize() : Nat
 
 public func count() : Nat
 
@@ -248,7 +246,7 @@ public func getActuator() : TA.TA
 
 public func setCacheExpiration(_expiration: Int) : ()
 
-public func clear(_delExc: Bool) : ()
+public func clear(_expiration: ?Int, _delForced: Bool) : ()
 
 public func update(_toid: Toid, _ttid: Ttid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid
 
@@ -259,6 +257,10 @@ public func append(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest,
 public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: PushCompRequest, _callback: ?Callback) : Tcid
 
 public func complete(_toid: Toid, _status: OrderStatus) : async Bool
+
+public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async Bool
+
+public func block(_toid: Toid) : ?Toid
 
 public func getData() : Data
 
@@ -272,11 +274,17 @@ public func create(_name: Text, _data: ?Blob, _callback: ?OrderCallback) : Toid
 
 public func push(_toid: Toid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest, _prepareCallback: ?Callback, _commitCallback: ?Callback) : Ttid
 
+public func taskDone(_toid: Toid, _ttid: Ttid, _toCallback: Bool) : async ?Ttid
+
+public func redo(_toid: Toid, _ttid: Ttid) : ?Ttid
+
 public func open(_toid: Toid) : ()
 
-public func finish(_toid: Toid) : ()
+public func close(_toid: Toid) : ()
 
 public func run(_toid: Toid) : async ?OrderStatus
+
+public func asyncMessageSize() : Nat
 
 public func count() : Nat
 
@@ -298,7 +306,7 @@ public func getActuator() : TA.TA
 
 public func setCacheExpiration(_expiration: Int) : ()
 
-public func clear(_delExc: Bool) : ()
+public func clear(_expiration: ?Int, _delForced: Bool) : ()
 
 public func update(_toid: Toid, _ttid: Ttid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest, _prepareCallback: ?Callback, _commitCallback: ?Callback) : Ttid
 
@@ -309,6 +317,10 @@ public func append(_toid: Toid, _prepare: TaskRequest, _commit: TaskRequest, _co
 public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: TaskRequest, _callback: ?Callback) : Tcid
 
 public func complete(_toid: Toid, _status: OrderStatus) : async Bool
+
+public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async Bool
+
+public func block(_toid: Toid) : ?Toid
 
 public func getData() : Data
 

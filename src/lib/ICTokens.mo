@@ -38,6 +38,7 @@ module {
     };
   };
   public type Self = actor {
+    ictokens_maxSupply : shared query () -> async ?Nat;
     ictokens_top100 : shared query () -> async [(Address, Amount)];
     ictokens_heldFirstTime : shared query Address -> async ?Int;
     ictokens_getConfig : shared query () -> async Config;

@@ -34,6 +34,9 @@ module {
     public type Nonce = Nat;
     public type Data = Blob;
     public type Txid = Blob;
+    public type TokenStd = { #icp; #cycles; #drc20; #dip20; #dft; #icrc1; #ledger; #ext; #other: Text; };
+    public type TokenSymbol = Text;
+    public type TokenInfo = (Principal, TokenSymbol, TokenStd);
     // type Price = (cycles: Nat, icp: Nat); // x cycles per y icp
     public type ShareWeighted = {
         shareTimeWeighted: Nat; 
@@ -139,7 +142,14 @@ module {
         MAX_STORAGE_TRIES: ?Nat;
         CYCLESFEE_RETENTION_RATE: ?Nat;
     };
-
+    public type ICSConfig = { 
+        TOKEN0_LIMIT: Nat;
+        TOKEN1_LIMIT: Nat;
+        FEE: Nat;
+        ICP_FEE: Nat;
+        RETENTION_RATE: Nat;
+        MAX_VOLATILITY: Nat;
+    };
     public type TokenType = {
         #Cycles;
         #Icp;
@@ -161,6 +171,7 @@ module {
         #Burn: Shares;
         #NoChange;
     };
+    public type Status = {#Failed; #Pending; #Completed; #PartiallyCompletedAndCancelled; #Cancelled;};
     public type TxnRecord = {
         txid: Txid;
         msgCaller: ?Principal;
@@ -170,7 +181,7 @@ module {
         cyclesWallet: ?CyclesWallet;
         token0: TokenType;
         token1: TokenType;
-        fee: {token0Fee: Nat; token1Fee: Nat; };
+        fee: {token0Fee: Int; token1Fee: Int; };
         shares: ShareChange;
         time: Time.Time;
         index: Nat;
@@ -180,7 +191,7 @@ module {
         orderType: ?{ #LMT; #FOK; #FAK; #MKT; };
         filled: {token0Value: BalanceChange; token1Value: BalanceChange;};
         details: [{counterparty: Txid; token0Value: BalanceChange; token1Value: BalanceChange; time: Time.Time;}];
-        status: {#Failed; #Pending; #Completed;};
+        status: Status;
         data: ?Data;
     };
     public type TxnResult = Result.Result<{   //<#ok, #err> 
@@ -214,12 +225,23 @@ module {
     getEvents : shared query ?Address -> async [TxnRecord];
     lastTxids : shared query ?Address -> async [Txid];
     liquidity : shared query ?Address -> async Liquidity;
-    liquidity2 : shared query ?Address -> async Liquidity2;
+    liquidity2 : shared query ?Address -> async Liquidity2; // ICS
     lpRewards : shared query Address -> async { cycles: Nat; icp: Nat; };
     txnRecord : shared query Txid -> async ?TxnRecord;
     txnRecord2 : shared Txid -> async ?TxnRecord;
     withdraw: shared ?Sa -> async ();
     yield : shared query () -> async (apy24h: { apyCycles: Float; apyIcp: Float; }, apy7d: { apyCycles: Float; apyIcp: Float; });
     version : shared query () -> async Text;
+    info : shared query () -> async {  // ICS
+        name: Text;
+        version: Text;
+        decimals: Nat8;
+        owner: Principal;
+        paused: Bool;
+        setting: ICSConfig;
+        token0: TokenInfo;
+        token1: TokenInfo;
+    };
+    stats : shared query() -> async {price:Float; change24h:Float; vol24h:Vol2; totalVol:Vol2};  // ICS
   }
 }

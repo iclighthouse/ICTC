@@ -18,6 +18,36 @@ module {
   };
   public type user_id = Principal;
   public type wasm_module = [Nat8];
+  public type HttpHeader = {
+      name : Text;
+      value : Text;
+  };
+  public type HttpMethod = {
+      #get;
+      #post;
+      #head;
+  };
+  public type TransformArgs = {
+    response : CanisterHttpResponsePayload;
+    context : Blob;
+  };
+  public type TransformContext = {
+        function : shared query TransformArgs -> async CanisterHttpResponsePayload;
+        context : Blob;
+    };
+  public type CanisterHttpRequestArgs = {
+      url : Text;
+      max_response_bytes : ?Nat64;
+      headers : [HttpHeader];
+      body : ?[Nat8];
+      method : HttpMethod;
+      transform : ?TransformContext;
+  };
+  public type CanisterHttpResponsePayload = {
+      status : Nat;
+      headers : [HttpHeader];
+      body : [Nat8];
+  };
   public type Self = actor {
     canister_status : shared { canister_id : canister_id } -> async {
         status : { #stopped; #stopping; #running };
@@ -53,5 +83,7 @@ module {
         canister_id : Principal;
         settings : canister_settings;
       } -> async ();
+    // outcalls (sample:https://github.com/dfinity/examples/blob/master/motoko/exchange_rate/src/Main.mo)
+    http_request : shared CanisterHttpRequestArgs -> async CanisterHttpResponsePayload;
   }
 }

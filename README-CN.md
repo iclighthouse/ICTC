@@ -75,10 +75,13 @@ Transaction Compensator的功能在Transaction Manager中一起实现，其作�
 - 2PC Transaction Manager (done)
 - ICTC Framework Beta Version  (done)
 - ICTC Framework v1.0  (done)
+- ICTC Framework v1.5  (done)
 
 ## 文档
 
-[ICTC Reference](./docs/ictc_reference.md)
+[ICTC v1.5 Reference](./docs/ictc_reference-1.5.md)
+
+[ICTC v1.0 Reference](./docs/ictc_reference.md)
 
 ## Examples
 

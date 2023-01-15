@@ -109,6 +109,7 @@ module {
     drc20_symbol : shared query () -> async Text;
     drc20_totalSupply : shared query () -> async Amount;
     drc20_transfer : shared (To, Amount, ?Nonce, ?Sa, ?Data) -> async TxnResult;
+    drc20_transferBatch : shared ([To], [Amount], ?Nonce, ?Sa, ?Data) -> async [TxnResult];
     drc20_transferFrom : shared (From, To, Amount, ?Nonce, ?Sa, ?Data) -> async TxnResult;
     drc20_txnQuery : shared query TxnQueryRequest -> async TxnQueryResponse;
     drc20_txnRecord : shared (Txid) -> async ?TxnRecord;

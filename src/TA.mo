@@ -1,5 +1,5 @@
 /**
- * Module     : TA.mo v0.5
+ * Module     : TA.mo v1.5
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
@@ -23,16 +23,19 @@ import TATypes "TATypes";
 import TaskHash "TaskHash";
 import Nat64 "mo:base/Nat64";
 import Binary "./lib/Binary";
+import ICRC1 "./lib/ICRC1";
+import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 // As motoko does not currently support features such as candid encode/decode, call_raw and reflection, a temporary solution is used.
 module {
-    public let Version: Nat = 6;
+    public let Version: Nat = 7;
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
     public type Receipt = CallType.Receipt;
     public type LocalCall = CallType.LocalCall;
+    public type LocalCallAsync = CallType.LocalCallAsync;
     public type TaskResult = CallType.TaskResult;
     public type Callee = TATypes.Callee;
     public type CalleeStatus = TATypes.CalleeStatus;
@@ -40,6 +43,7 @@ module {
     public type Toid = TATypes.Toid; // from 1
     public type Attempts = TATypes.Attempts;
     public type Task = TATypes.Task;
+    public type AgentCallback = TATypes.AgentCallback;
     public type Callback = TATypes.Callback;
     public type TaskEvent = TATypes.TaskEvent;
     public type ErrorLog = TATypes.ErrorLog;
@@ -61,7 +65,7 @@ module {
         for (t in b.vals()){
             buffer.add(t);
         };
-        return buffer.toArray();
+        return Buffer.toArray(buffer);
     };
     // replace Hash.hash (Warning: Incompatible)
     public func natHash(n : Nat) : Hash.Hash{
@@ -103,16 +107,18 @@ module {
     };
     
     /// limitNum: The actuator runs `limitNum` tasks at once.
-    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, taskCallback: ?Callback) {
-
-        var tasks = Deque.empty<(Ttid, Task)>();
+    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, localCallAsync: LocalCallAsync, agentCallback: ?AgentCallback, taskCallback: ?Callback) {
+        var tasks = Deque.empty<(Ttid, Task)>(); /*fix*/
         var index : Nat = 1;
         var firstIndex : Nat = 1;
-        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent> (Nat.equal, natHash);
+        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent> (Nat.equal, natHash); /*fix*/
         var errIndex : Nat = 1;
         var firstErrIndex : Nat = 1;
-        var errorLogs = TrieMap.TrieMap<Nat, ErrorLog> (Nat.equal, natHash);
+        var errorLogs = TrieMap.TrieMap<Nat, ErrorLog> (Nat.equal, natHash); /*fix*/
         var callees = TrieMap.TrieMap<Callee, CalleeStatus> (Principal.equal, Principal.hash);
+        var actuationThreads : Nat = 0;
+        var lastActuationTime : Time.Time = 0;
+        var countAsyncMessage : Nat = 0;
         // var receiption : ?CallType.Receipt = null;
         // public func getReceiption() : ?CallType.Receipt{
         //     return receiption;
@@ -208,7 +214,7 @@ module {
                 task = _task;
                 attempts = attempts;
                 result = (#Doing, null, null);
-                callbackStatus = null;
+                callbackStatus = ?#Todo;
                 time = Time.now();
                 txHash = Blob.fromArray([]);
             };
@@ -228,17 +234,17 @@ module {
                         time = Time.now();
                         txHash = taskLog.txHash;
                     };
-                    let txHash = TaskHash.hashb(Blob.fromArray([]), log);
-                    log := {
-                        toid = log.toid;
-                        ttid = log.ttid;
-                        task = log.task;
-                        attempts = log.attempts;
-                        result = log.result;
-                        callbackStatus = log.callbackStatus;
-                        time = log.time;
-                        txHash = txHash;
-                    };
+                    // let txHash = TaskHash.hashb(Blob.fromArray([]), log);
+                    // log := {
+                    //     toid = log.toid;
+                    //     ttid = log.ttid;
+                    //     task = log.task;
+                    //     attempts = log.attempts;
+                    //     result = log.result;
+                    //     callbackStatus = log.callbackStatus;
+                    //     time = log.time;
+                    //     txHash = txHash;
+                    // };
                     taskLogs.put(_ttid, log);
                     var calleeStatus = { successCount = 1; failureCount = 0; continuousFailure = 0;};
                     if (_result.0 == #Error or _result.0 == #Unknown){
@@ -343,73 +349,54 @@ module {
                 };
             };
         };
-        private func _run() : async Nat {
-            var size: Nat = _size();
-            var count: Nat = 0;
-            var callCount: Nat = 0;
-            var receipt: ?CallType.Receipt = null;
-            while (count < limitNum and callCount < size * 2 and Option.isSome(Deque.peekFront(tasks))){
-                switch(Deque.popFront(tasks)){
-                    case(?((ttid, task), deque)){
-                        tasks := deque;
-                        var toRedo: Bool = true;
-                        if(_filter(ttid, task)){
-                            //get receipt
-                            switch(task.forTtid){
-                                case(?(forTtid)){
-                                    switch(taskLogs.get(forTtid)){
-                                        case(?(taskLog)){
-                                            receipt := taskLog.result.1;
+        // private func _run() : async Nat {
+        // };
+
+        public func done(_ttid: Ttid, _toCallback: Bool) : async ?Ttid{
+            var status: Status = #Done;
+            switch(taskLogs.get(_ttid)){
+                case(?(log)){
+                    if (log.result.0 != #Done){
+                        if (_toCallback){
+                            var callbackStatus: ?Status = null;
+                            switch(agentCallback){
+                                case(?(_agentCallback)){
+                                    try{
+                                        countAsyncMessage += 2;
+                                        await _agentCallback(_ttid, log.task, (#Done, null, null));
+                                        callbackStatus := ?#Done;
+                                        countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                    } catch(e){
+                                        callbackStatus := ?#Error;
+                                        status := #Error;
+                                        countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                    };
+                                };
+                                case(_){
+                                    switch(taskCallback){
+                                        case(?(_taskCallback)){
+                                            try{
+                                                _taskCallback(_ttid, log.task, (#Done, null, null));
+                                                callbackStatus := ?#Done;
+                                            } catch(e){
+                                                callbackStatus := ?#Error;
+                                                status := #Error;
+                                            };
                                         };
                                         case(_){};
                                     };
                                 };
-                                case(_){};
                             };
-                            //receiption := receipt; // for test
-                            //prelog
-                            var attempts = _preLog(ttid, task); // attempts+1
-                            //call
-                            var domain: CallType.Domain = #Canister(task.callee, task.cycles);
-                            switch(task.callType){
-                                case(#This(method)){ domain := #Local(localCall); };
-                                case(_){};
-                            };
-                            let result = await CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
-                            if (result.0 != #Error or attempts >= task.attemptsMax){
-                                //callback
-                                var callbackStatus: ?Status = null;
-                                switch(taskCallback){
-                                    case(?(_taskCallback)){
-                                        try{
-                                            await _taskCallback(ttid, task, result);
-                                            callbackStatus := ?#Done;
-                                        } catch(e){
-                                            callbackStatus := ?#Error;
-                                        };
-                                    };
-                                    case(_){};
-                                };
-                                //postlog
-                                _postLog(ttid, result);
-                                //callbacklog
-                                _callbackLog(ttid, callbackStatus);
-                                toRedo := false;
-                            };
-                            callCount += 1;
+                            _callbackLog(_ttid, callbackStatus);
                         };
-                        //redo
-                        if (toRedo){
-                            _push(ttid, task);
-                        };
-                        //autoClear
-                        _clear(null, false);
-                        count += 1;
+                        _postLog(_ttid, (status, null, null));
+                        return ?_ttid;
+                    } else {
+                        return null;
                     };
-                    case(_){};
                 };
+                case(_){ return null; };
             };
-            return callCount;
         };
 
         public func update(_ttid: Ttid, _task: Task) : Ttid {
@@ -430,7 +417,157 @@ module {
             return _removeByOid(_toid);
         };
         public func run() : async Nat{
-            return await _run();
+            var size: Nat = _size();
+            var count: Nat = 0;
+            var callCount: Nat = 0;
+            var receipt: ?CallType.Receipt = null;
+            actuationThreads += 1;
+            while (count < limitNum and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
+                lastActuationTime := Time.now();
+                switch(Deque.popFront(tasks)){
+                    case(?((ttid, task_), deque)){
+                        tasks := deque;
+                        //===fix ICRC1 null of subaccount=====
+                        var task: Task = task_;
+                        switch(task.callType){
+                            case(#ICRC1(#icrc1_transfer(args))){
+                                var argsTemp: ICRC1.TransferArgs = args;
+                                switch(args.to.subaccount){
+                                    case(?(_sub)){
+                                        if (Blob.toArray(_sub).size() == 0) {
+                                            argsTemp := {
+                                                from_subaccount = args.from_subaccount;
+                                                to = { owner = args.to.owner; subaccount = null; };
+                                                amount = args.amount;
+                                                fee = args.fee;
+                                                memo = args.memo;
+                                                created_at_time = args.created_at_time;
+                                            };
+                                        };
+                                    };
+                                    case(_){};
+                                };
+                                switch(args.from_subaccount){
+                                    case(?(_sub)){
+                                        if (Blob.toArray(_sub).size() == 0) {
+                                            argsTemp := {
+                                                from_subaccount = null;
+                                                to = args.to;
+                                                amount = args.amount;
+                                                fee = args.fee;
+                                                memo = args.memo;
+                                                created_at_time = args.created_at_time;
+                                            };
+                                        };
+                                    };
+                                    case(_){};
+                                };
+                                task := {
+                                    callee = task.callee;
+                                    callType = #ICRC1(#icrc1_transfer(argsTemp));
+                                    preTtid = task.preTtid;
+                                    toid = task.toid;
+                                    forTtid = task.forTtid;
+                                    attemptsMax = task.attemptsMax;
+                                    recallInterval = task.recallInterval;
+                                    cycles = task.cycles;
+                                    data = task.data;
+                                    time = task.time;
+                                };
+                            };
+                            case(_){};
+                        };
+                        //================
+                        var toRedo: Bool = true;
+                        if(_filter(ttid, task)){
+                            //get receipt
+                            switch(task.forTtid){
+                                case(?(forTtid)){
+                                    switch(taskLogs.get(forTtid)){
+                                        case(?(taskLog)){
+                                            receipt := taskLog.result.1;
+                                        };
+                                        case(_){};
+                                    };
+                                };
+                                case(_){};
+                            };
+                            //receiption := receipt; // for test
+                            //prelog
+                            var attempts = _preLog(ttid, task); // attempts+1, set #Doing
+                            //call
+                            var domain: CallType.Domain = #Canister(task.callee, task.cycles);
+                            switch(task.callType){
+                                case(#This(method)){ domain := #Local(localCall); };
+                                case(#ThisAsync(method)){ domain := #LocalAsync(localCallAsync); };
+                                case(_){};
+                            };
+                            var result : TaskResult = (#Doing, null,null);
+                            try{
+                                countAsyncMessage += 3;
+                                result := await CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
+                                countAsyncMessage -= Nat.min(3, countAsyncMessage);
+                            }catch(e){ 
+                                result := (#Error, null, ?{code = Error.code(e); message = Error.message(e); });
+                                countAsyncMessage -= Nat.min(3, countAsyncMessage); 
+                            };
+                            var callbackStatus: ?Status = null;
+                            var status: Status = result.0;
+                            var errorMsg: ?CallType.Err = result.2;
+                            if (status == #Done or status == #Unknown or attempts >= task.attemptsMax){
+                                //callback
+                                switch(agentCallback){
+                                    case(?(_agentCallback)){
+                                        try{
+                                            countAsyncMessage += 2;
+                                            await _agentCallback(ttid, task, result);
+                                            callbackStatus := ?#Done;
+                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                        } catch(e){
+                                            callbackStatus := ?#Error;
+                                            status := #Error;
+                                            errorMsg := ?{code = Error.code(e); message = Error.message(e); };
+                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                        };
+                                    };
+                                    case(_){
+                                        switch(taskCallback){
+                                            case(?(_taskCallback)){
+                                                try{ // Unable to catch error. If an error occurs, the status of this task is #Doing, and does not exist in the TaskPool
+                                                    _taskCallback(ttid, task, result);
+                                                    callbackStatus := ?#Done;
+                                                } catch(e){
+                                                    callbackStatus := ?#Error;
+                                                    status := #Error;
+                                                    errorMsg := ?{code = Error.code(e); message = Error.message(e); };
+                                                };
+                                            };
+                                            case(_){};
+                                        };
+                                    };
+                                };
+                                //postlog
+                                result := (status, result.1, errorMsg);
+                                _postLog(ttid, result);
+                                //callbacklog
+                                _callbackLog(ttid, callbackStatus);
+                                toRedo := false;
+                            };
+                            callCount += 1;
+                        };
+                        //redo
+                        if (toRedo){
+                            _push(ttid, task);
+                        };
+                        //autoClear
+                        _clear(null, false);
+                        count += 1;
+                    };
+                    case(_){};
+                };
+            };
+            actuationThreads := 0;
+            return callCount;
         };
         public func clear(_expiration: ?Int, _clearErr: Bool) : (){
             _clear(_expiration, _clearErr);
@@ -444,6 +581,9 @@ module {
         };
         public func getTaskPool() : [(Ttid, Task)]{
             return _toArray();
+        };
+        public func actuations() : {actuationThreads: Nat; lastActuationTime: Time.Time; countAsyncMessage: Nat}{
+            return {actuationThreads = actuationThreads; lastActuationTime = lastActuationTime; countAsyncMessage = countAsyncMessage };
         };
         
         public func isCompleted(_ttid: Ttid) : Bool{

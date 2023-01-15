@@ -59,12 +59,18 @@ module {
     fee : shared query () -> async (cycles: Nat); //cycles
     setStd : shared (Text) -> async (); 
     store : shared (_txn: TxnRecord) -> async (); 
+    storeBatch : shared (_txns: [TxnRecord]) -> async (); 
     storeBytes: shared (_txid: Txid, _data: [Nat8]) -> async (); 
+    storeBytesBatch: shared (_txns: [(_txid: Txid, _data: [Nat8])]) -> async (); 
     bucket : shared query (_token: Principal, _txid: Txid, _step: Nat, _version: ?Nat8) -> async (bucket: ?Principal);
   };
   public type Bucket = actor {
     txnBytes: shared query (_token: Token, _txid: Txid) -> async ?([Nat8], Time.Time);
+    txnBytesHistory: shared query (_token: Token, _txid: Txid) -> async [([Nat8], Time.Time)];
     txn: shared query (_token: Token, _txid: Txid) -> async ?(TxnRecord, Time.Time);
+    txnHistory: shared query (_token: Token, _txid: Txid) -> async [(TxnRecord, Time.Time)];
+    txnHash: shared query (_token: Token, _txid: Txid, _index: Nat) -> async ?Text;
+    txnBytesHash: shared query (_token: Token, _txid: Txid, _index: Nat) -> async ?Text;
   };
   public type Impl = actor {
     drc202_getConfig : shared query () -> async Setting;
@@ -81,7 +87,7 @@ module {
         for (t in b.vals()){
             buffer.add(t);
         };
-        return buffer.toArray();
+        return Buffer.toArray(buffer);
     };
   public func generateTxid(_canister: Principal, _caller: AccountId, _nonce: Nat): Txid{
     let canister: [Nat8] = Blob.toArray(Principal.toBlob(_canister));
