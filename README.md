@@ -76,6 +76,7 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 - ICTC Framework Beta Version (done)
 - ICTC Framework v1.0 (done)
 - ICTC Framework v1.5  (done)
+- ICTC Framework v2.0  (done)
 
 ## Reference Docs
 

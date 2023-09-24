@@ -1125,6 +1125,21 @@ module {
                     return (item.0, orders.get(item.0));
                 });
         };
+        public func getBlockingOrders() : [(Toid, Order)]{
+            return Array.mapFilter<(Toid, Time.Time), (Toid, Order)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)): ?(Toid, Order) { 
+                    switch(orders.get(item.0)){
+                        case(?order){
+                            if (order.status == #Blocking){
+                                return ?(item.0, order);
+                            }else{
+                                return null;
+                            };
+                        };
+                        case(_){ return null };
+                    };
+                });
+        };
         public func getTaskEvents(_toid: Toid) : [TaskEvent]{
             var events: [TaskEvent] = [];
             for (tid in Option.get(taskEvents.get(_toid), []).vals()){

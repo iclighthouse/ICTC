@@ -216,6 +216,8 @@ public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order)]; totalPag
 
 public func getAliveOrders() : [(Toid, ?Order)]
 
+public func getBlockingOrders() : [(Toid, Order)]
+
 public func getTaskEvents(_toid: Toid) : [TaskEvent]
 
 public func getActuator() : TA.TA
@@ -277,6 +279,8 @@ public func getOrder(_toid: Toid) : ?Order
 public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order)]; totalPage: Nat; total: Nat}
 
 public func getAliveOrders() : [(Toid, ?Order)]
+
+public func getBlockingOrders() : [(Toid, Order)]
 
 public func getTaskEvents(_toid: Toid) : [TaskEvent]
 
