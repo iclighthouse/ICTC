@@ -1,5 +1,5 @@
 /**
- * Module     : CallType.mo v1.5
+ * Module     : CallType.mo
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: Wrapping the methods used by the transaction. Modify this file to suit your needs.
@@ -19,6 +19,7 @@ import ICRC2 "./lib/ICRC1";
 import ICTokens "./lib/ICTokens";
 import ICSwap "./lib/ICSwap";
 import ICDex "./lib/ICDexTypes";
+import Result "mo:base/Result";
 import Error "mo:base/Error";
 import IC "./lib/IC";
 import Ledger "./lib/Ledger";
@@ -26,15 +27,15 @@ import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
 module {
-    public let Version: Nat = 7;
+    public let Version: Nat = 8;
     public let ICCanister: Text = "aaaaa-aa";
     public let LedgerCanister: Text = "ryjl3-tyaaa-aaaaa-aaaba-cai";
     public let CFCanister: Text = "6nmrm-laaaa-aaaak-aacfq-cai";
     public type Status = {#Todo; #Doing; #Done; #Error; #Unknown; };
     public type Err = {code: Error.ErrorCode; message: Text; };
     public type TaskResult = (Status, ?Receipt, ?Err);
-    public type LocalCall = (CallType, ?Receipt) -> (TaskResult);
-    public type LocalCallAsync = (CallType, ?Receipt) -> async (TaskResult);
+    public type LocalCall = (CallType, ?Receipt) -> async (TaskResult);
+    // public type LocalCallAsync = (CallType, ?Receipt) -> async (TaskResult);
     public type BlobFill = {#AutoFill; #ManualFill: Blob; };
     public type NatFill = {#AutoFill; #ManualFill: Nat; };
     /// type ErrorCode = {
@@ -48,6 +49,8 @@ module {
     ///   #canister_reject;
     ///   // Canister trapped.
     ///   #canister_error;
+    ///   // Error issuing inter-canister call (0.8.0)
+    ///   #call_error : { err_code :  Nat32 }
     ///   // Future error code (with unrecognized numeric code)
     ///   #future : Nat32;
     ///     9901    No such actor.
@@ -108,7 +111,7 @@ module {
         //     #txnRecord2 : BlobFill;
         //     //#liquidity : ?CF.Address;
         //     #withdraw: ?CF.Sa;
-        // };
+        // }; 
         #DRC20: {
             #approve : (DRC20.Spender, DRC20.Amount, ?DRC20.Nonce, ?DRC20.Sa, ?DRC20.Data);
             #balanceOf : DRC20.Address;
@@ -169,7 +172,6 @@ module {
         #This: {
             #foo: (Nat);
         };
-        #ThisAsync;
     };
 
     /// Wrap return values of methods.
@@ -284,12 +286,11 @@ module {
         #This: {
             #foo: ();
         };
-        #ThisAsync;
     };
 
     public type Domain = {
         #Local : LocalCall;
-        #LocalAsync : LocalCallAsync;
+        //#LocalAsync : LocalCallAsync;
         #Canister : (Principal, Nat); // (Canister-id, AddCycles)
     };
     private func _getTxid(txid: BlobFill, receipt: ?Receipt) : Blob{
@@ -324,7 +325,7 @@ module {
     };
 
     /// Wrap the calling function
-    public func call(_args: CallType, _domain: Domain, _receipt: ?Receipt) : async TaskResult{
+    public func call(_args: CallType, _domain: Domain, _receipt: ?Receipt) : async* TaskResult{
         switch(_domain){
             // Local Task Call
             case(#Local(localCall)){
@@ -333,7 +334,7 @@ module {
                     case(#__block){ return (#Error, ?#__block, ?{code=#future(9904); message="Blocked by code."; }); };
                     case(#This(method)){
                         try{
-                            return localCall(_args, _receipt);
+                            return await localCall(_args, _receipt);
                         } catch (e){
                             return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
                         };
@@ -341,20 +342,20 @@ module {
                     case(_){ return (#Error, null, ?{code=#future(9901); message="No such actor."; }); };
                 };
             };
-            case(#LocalAsync(localCallAsync)){
-                switch(_args){
-                    case(#__skip){ return (#Done, ?#__skip, null); };
-                    case(#__block){ return (#Error, ?#__block, ?{code=#future(9904); message="Blocked by code."; }); };
-                    case(#ThisAsync(method)){
-                        try{
-                            return await localCallAsync(_args, _receipt);
-                        } catch (e){
-                            return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
-                        };
-                    };
-                    case(_){ return (#Error, null, ?{code=#future(9901); message="No such actor."; }); };
-                };
-            };
+            // case(#LocalAsync(localCallAsync)){
+            //     switch(_args){
+            //         case(#__skip){ return (#Done, ?#__skip, null); };
+            //         case(#__block){ return (#Error, ?#__block, ?{code=#future(9904); message="Blocked by code."; }); };
+            //         case(#ThisAsync(method)){
+            //             try{
+            //                 return await localCallAsync(_args, _receipt);
+            //             } catch (e){
+            //                 return (#Error, null, ?{code=Error.code(e); message=Error.message(e); });
+            //             };
+            //         };
+            //         case(_){ return (#Error, null, ?{code=#future(9901); message="No such actor."; }); };
+            //     };
+            // };
             // Cross-Canister Task Call
             case(#Canister((callee, cycles))){
                 var calleeId = Principal.toText(callee);

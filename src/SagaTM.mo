@@ -1,5 +1,5 @@
 /**
- * Module     : SagaTM.mo v1.5
+ * Module     : SagaTM.mo v2.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Saga Transaction Manager.
@@ -20,7 +20,7 @@ import TA "./TA";
 import Error "mo:base/Error";
 
 module {
-    public let Version: Nat = 7;
+    public let Version: Nat = 8;
     public type Toid = Nat;
     public type Ttid = TA.Ttid;
     public type Tcid = TA.Ttid;
@@ -31,7 +31,7 @@ module {
     public type Status = TA.Status;
     public type Callback = TA.Callback;
     public type LocalCall = TA.LocalCall;
-    public type LocalCallAsync = TA.LocalCallAsync;
+    //public type LocalCallAsync = TA.LocalCallAsync;
     public type TaskResult = TA.TaskResult;
     public type TaskEvent = TA.TaskEvent;
     public type ErrorLog = TA.ErrorLog;
@@ -40,7 +40,7 @@ module {
     public type OrderStatus = {#Todo; #Doing; #Compensating; #Blocking; #Done; #Recovered;};
     public type Compensation = Task;
     public type CompStrategy = { #Forward; #Backward; };
-    public type OrderCallback = (_toid: Toid, _status: OrderStatus, _data: ?Blob) -> ();
+    public type OrderCallback = (_toName: Text, _toid: Toid, _status: OrderStatus, _data: ?Blob) -> async ();
     public type PushTaskRequest = {
         callee: Callee;
         callType: CallType;
@@ -86,7 +86,7 @@ module {
         actuator: TA.Data; 
     };
 
-    public class SagaTM(this: Principal, localCall: ?LocalCall, localCallAsync: ?LocalCallAsync, defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
+    public class SagaTM(this: Principal, localCall: ?LocalCall, /*localCallAsync: ?LocalCallAsync,*/ defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
         let limitAtOnce: Nat = 200;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
@@ -102,9 +102,9 @@ module {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
                 case(_){
-                    let localCall_ = Option.get(localCall, func (ct: CallType, r: ?Receipt): (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    let localCallAsync_ = Option.get(localCallAsync, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    let act = TA.TA(limitAtOnce, autoClearTimeout, this, localCall_, localCallAsync_, ?_taskCallbackProxy, null);
+                    let localCall_ = Option.get(localCall, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
+                    //let localCallAsync_ = Option.get(localCallAsync, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
+                    let act = TA.TA(limitAtOnce, autoClearTimeout, this, localCall_, /*localCallAsync_,*/ ?_taskCallbackProxy, null);
                     actuator_ := ?act;
                     return act;
                 };
@@ -113,7 +113,7 @@ module {
         };
 
         // Unique callback entrance. This function will call each specified callback of task
-        private func _taskCallbackProxy(_ttid: Ttid, _task: Task, _result: TaskResult) : async (){
+        private func _taskCallbackProxy(_ttid: Ttid, _task: Task, _result: TaskResult) : async* (){
             let toid = Option.get(_task.toid, 0);
             switch(_status(toid)){
                 case(?(#Todo)){ _setStatus(toid, #Doing); };
@@ -122,11 +122,13 @@ module {
             var orderStatus : OrderStatus = #Todo;
             var strategy: CompStrategy = #Backward;
             var isClosed : Bool = false;
+            var toName : Text = "";
             switch(orders.get(toid)){
                 case(?(order)){ 
                     orderStatus := order.status;
                     strategy := order.compStrategy; 
                     isClosed := order.allowPushing == #Closed;
+                    toName := order.name;
                 };
                 case(_){};
             };
@@ -137,21 +139,27 @@ module {
             switch(taskCallback.get(_ttid)){
                 case(?(_taskCallback)){ 
                     try{
-                        _taskCallback(_ttid, _task, _result); 
+                        countAsyncMessage += 2;
+                        await _taskCallback(toName, _ttid, _task, _result); 
+                        countAsyncMessage -= Nat.min(2, countAsyncMessage); 
                         taskCallback.delete(_ttid);
                         callbackDone := true;
                     } catch(e){
                         callbackDone := false;
+                        countAsyncMessage -= Nat.min(2, countAsyncMessage);
                     };
                 };
                 case(_){
                     switch(defaultTaskCallback){
                         case(?(_taskCallback)){
                             try{
-                                _taskCallback(_ttid, _task, _result);
+                                countAsyncMessage += 2;
+                                await _taskCallback(toName, _ttid, _task, _result);
+                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                 callbackDone := true;
                             }catch(e){
                                 callbackDone := false;
+                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
                             };
                         };
                         case(_){ callbackDone := true; };
@@ -164,7 +172,7 @@ module {
                     _setStatus(toid, #Recovered);
                     var callbackStatus : ?Status = null;
                     try{ 
-                        callbackStatus := _orderComplete(toid); 
+                        callbackStatus := await* _orderComplete(toid); 
                         aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != toid });
                     }catch(e){ 
                         callbackStatus := ?#Error; 
@@ -181,7 +189,7 @@ module {
                     _setStatus(toid, #Done);
                     var callbackStatus : ?Status = null;
                     try{ 
-                        callbackStatus := _orderComplete(toid); 
+                        callbackStatus := await* _orderComplete(toid); 
                         aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != toid });
                     }catch(e){ 
                         callbackStatus := ?#Error; 
@@ -457,7 +465,7 @@ module {
             };
         };
         /// Set the status of TO to #Done. If an error occurs and cannot be caught, the status of TO is #Doing
-        private func _orderComplete(_toid: Toid) : ?Status{
+        private func _orderComplete(_toid: Toid) : async* ?Status{
             var callbackStatus : ?Status = null;
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -470,23 +478,29 @@ module {
                     //try{ 
                         switch(orderCallback.get(_toid)){
                             case(?(_orderCallback)){ 
-                                //try{
-                                    _orderCallback(_toid, order.status, order.data); 
+                                try{
+                                    countAsyncMessage += 2;
+                                    await _orderCallback(order.name, _toid, order.status, order.data); 
+                                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                     orderCallback.delete(_toid);
                                     callbackStatus := ?#Done;
-                                // }catch(e){
-                                //     callbackStatus := ?#Error;
-                                // };
+                                }catch(e){
+                                    callbackStatus := ?#Error;
+                                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                };
                             };
                             case(_){
                                 switch(defaultOrderCallback){
                                     case(?(_orderCallback)){
-                                        //try{
-                                            _orderCallback(_toid, order.status, order.data); 
+                                        try{
+                                            countAsyncMessage += 2;
+                                            await _orderCallback(order.name, _toid, order.status, order.data); 
+                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                             callbackStatus := ?#Done;
-                                        // }catch(e){
-                                        //     callbackStatus := ?#Error;
-                                        // };
+                                        }catch(e){
+                                            callbackStatus := ?#Error;
+                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                        };
                                     };
                                     case(_){};
                                 };
@@ -580,14 +594,14 @@ module {
                 case(_){ return false; };
             };
         };
-        private func _statusTest(_toid: Toid) : async (){
+        private func _statusTest(_toid: Toid) : async* (){
             switch(orders.get(_toid)){
                 case(?(order)){
                     if (order.status == #Doing and order.allowPushing == #Closed and _isTasksDone(_toid)){
                         _setStatus(_toid, #Done);
                         var callbackStatus : ?Status = null;
                         try{ 
-                            callbackStatus := _orderComplete(_toid); 
+                            callbackStatus := await* _orderComplete(_toid); 
                             aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                         }catch(e){ 
                             callbackStatus := ?#Error; 
@@ -599,7 +613,7 @@ module {
                         _setStatus(_toid, #Recovered);
                         var callbackStatus : ?Status = null;
                         try{ 
-                            callbackStatus := _orderComplete(_toid); 
+                            callbackStatus := await* _orderComplete(_toid); 
                             aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                         }catch(e){ 
                             callbackStatus := ?#Error; 
@@ -611,9 +625,13 @@ module {
                     } else if (order.status == #Blocking and order.allowPushing == #Closed and _isTasksDone(_toid)){
                         // await _orderComplete(_toid, #Done);
                         // _removeTATaskByOid(_toid);
+                    } else if (order.status == #Done or order.status == #Recovered){
+                        aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                     };
                 };
-                case(_){};
+                case(_){
+                    aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
+                };
             };
         };
         private func _orderLastCid(_toid: Toid) : ?Tcid{
@@ -844,18 +862,15 @@ module {
             return ttid;
         };
         /// set task done   
-        public func taskDone(_toid: Toid, _ttid: Ttid, _toCallback: Bool) : async ?Ttid{
+        public func taskDone(_toid: Toid, _ttid: Ttid, _toCallback: Bool) : async* ?Ttid{
             if (_inAliveOrders(_toid) and not(actuator().isInPool(_ttid)) and not(actuator().isCompleted(_ttid))){
                 switch(orders.get(_toid)){
                     case(?(order)){
                         if ((order.status == #Todo or order.status == #Doing or order.status == #Blocking) and not(_isTasksDone(_toid))){
                             try{
-                                countAsyncMessage += 2;
-                                let res = await actuator().done(_ttid, _toCallback);
-                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                let res = await* actuator().done(_ttid, _toCallback);
                                 return res;
                             }catch(e){ 
-                                countAsyncMessage -= Nat.min(2, countAsyncMessage); 
                                 return null;
                             };
                         };
@@ -932,21 +947,13 @@ module {
             let actuations = actuator().actuations();
             if (actuations.actuationThreads < 3 or Time.now() > actuations.lastActuationTime + 60*1000000000){ // 60s
                 try{ 
-                    countAsyncMessage += 2;
-                    let count = await actuator().run(); 
-                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
-                }catch(e){
-                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
-                };
+                    let count = await* actuator().run(); 
+                }catch(e){};
             };
             if (_toid > 0){
                 try{
-                    countAsyncMessage += 2;
-                    await _statusTest(_toid);
-                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
-                }catch(e){
-                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
-                };
+                    await* _statusTest(_toid);
+                }catch(e){};
             };
             return _status(_toid);
         };
@@ -977,6 +984,21 @@ module {
             return Array.map<(Toid, Time.Time), (Toid, ?Order)>(List.toArray(aliveOrders), 
                 func (item:(Toid, Time.Time)):(Toid, ?Order) { 
                     return (item.0, orders.get(item.0));
+                });
+        };
+        public func getBlockingOrders() : [(Toid, Order)]{
+            return Array.mapFilter<(Toid, Time.Time), (Toid, Order)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)): ?(Toid, Order) { 
+                    switch(orders.get(item.0)){
+                        case(?order){
+                            if (order.status == #Blocking){
+                                return ?(item.0, order);
+                            }else{
+                                return null;
+                            };
+                        };
+                        case(_){ return null };
+                    };
                 });
         };
         public func getTaskEvents(_toid: Toid) : [TaskEvent]{
@@ -1062,13 +1084,13 @@ module {
             return tcid;
         };
         /// complete: Used to change the status of a blocked order to completed.
-        public func complete(_toid: Toid, _status: OrderStatus) : async Bool{
+        public func complete(_toid: Toid, _status: OrderStatus) : async* Bool{
             assert(_status == #Done or _status == #Recovered);
             if (_statusEqual(_toid, #Blocking) and not(_isOpening(_toid)) and (_isTasksDone(_toid) or _isCompsDone(_toid))){
                 _setStatus(_toid, _status);
                 var callbackStatus : ?Status = null;
                 try{ 
-                    callbackStatus := _orderComplete(_toid); 
+                    callbackStatus := await* _orderComplete(_toid); 
                     aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                 }catch(e){ 
                     callbackStatus := ?#Error; 
@@ -1086,6 +1108,7 @@ module {
                 case(?(order)){
                     if (List.size(order.tasks) == 0 and List.size(order.comps) == 0){
                         _setStatus(_toid, #Done);
+                        aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                         return true;
                     }else{
                         return false;
@@ -1094,20 +1117,22 @@ module {
                 case(_){ return false; };
             };
         };
-        public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async Bool{
+        public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async* Bool{
             assert(_status == #Done or _status == #Recovered);
             if (_inAliveOrders(_toid) and not(_isOpening(_toid)) and (_isTasksDone(_toid) or _isCompsDone(_toid))){
                 _setStatus(_toid, _status);
                 if(_toCallback){
                     var callbackStatus : ?Status = null;
                     try{ 
-                        callbackStatus := _orderComplete(_toid); 
+                        callbackStatus := await* _orderComplete(_toid); 
                         aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                     }catch(e){ 
                         callbackStatus := ?#Error; 
                         _setStatus(_toid, #Blocking);
                     };
                     _setCallbackStatus(_toid, callbackStatus);
+                }else{
+                    aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
                 };
                 //await _orderComplete(_toid, _status);
                 _removeTATaskByOid(_toid);
@@ -1144,6 +1169,23 @@ module {
                 //taskCallback = Iter.toArray(taskCallback.entries());
                 //orderCallback = Iter.toArray(orderCallback.entries());
                 actuator = actuator().getData(); 
+            };
+        };
+        public func getDataBase() : Data {
+            let _orders = Iter.toArray(Iter.filter(orders.entries(), func (x: (Toid, Order)): Bool{
+                x.1.time + 72*3600*1000000000 > Time.now() or List.some(aliveOrders, func (t: (Toid, Time.Time)): Bool{ x.0 == t.0 })
+            }));
+            let _taskEvents = Iter.toArray(Iter.filter(taskEvents.entries(), func (x: (Toid, [Ttid])): Bool{
+                Option.isSome(Array.find(_orders, func (t: (Toid, Order)): Bool{ x.0 == t.0 }))
+            }));
+            return {
+                autoClearTimeout = autoClearTimeout; 
+                index = index; 
+                firstIndex = firstIndex; 
+                orders = _orders;
+                aliveOrders = aliveOrders; 
+                taskEvents = _taskEvents;
+                actuator = actuator().getDataBase(); 
             };
         };
         public func setData(_data: Data) : (){

@@ -29,8 +29,9 @@ module {
     };
     public type ApproveArgs = {
         from_subaccount : ?Blob;
-        spender : Principal;
-        amount : Int;
+        spender : Account; // *
+        amount : Nat; // *
+        expected_allowance: ?Nat; // *
         expires_at : ?Nat64;
         fee : ?Nat;
         memo : ?Blob;
@@ -40,6 +41,7 @@ module {
         #BadFee : { expected_fee : Nat };
         // The caller does not have enough funds to pay the approval fee.
         #InsufficientFunds : { balance : Nat };
+        #AllowanceChanged : { current_allowance : Nat }; // *
         #Expired : { ledger_time : Nat64 };
         #TooOld;
         #CreatedInFuture: { ledger_time : Nat64 };
@@ -48,6 +50,7 @@ module {
         #GenericError : { error_code : Nat; message : Text };
     };
     public type TransferFromArgs = {
+        spender_subaccount : ?Blob; // *
         from : Account;
         to : Account;
         amount : Nat;
@@ -70,7 +73,7 @@ module {
     };
     public type AllowanceArgs = {
         account : Account;
-        spender : Principal;
+        spender : Account; // *
     };
     
     public type Self = actor {

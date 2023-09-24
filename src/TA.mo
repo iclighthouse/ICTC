@@ -1,5 +1,5 @@
 /**
- * Module     : TA.mo v1.5
+ * Module     : TA.mo v2.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
@@ -27,15 +27,14 @@ import ICRC1 "./lib/ICRC1";
 import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 
-// As motoko does not currently support features such as candid encode/decode, call_raw and reflection, a temporary solution is used.
 module {
-    public let Version: Nat = 7;
+    public let Version: Nat = 8;
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
     public type Receipt = CallType.Receipt;
     public type LocalCall = CallType.LocalCall;
-    public type LocalCallAsync = CallType.LocalCallAsync;
+    //public type LocalCallAsync = CallType.LocalCallAsync;
     public type TaskResult = CallType.TaskResult;
     public type Callee = TATypes.Callee;
     public type CalleeStatus = TATypes.CalleeStatus;
@@ -107,7 +106,7 @@ module {
     };
     
     /// limitNum: The actuator runs `limitNum` tasks at once.
-    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, localCallAsync: LocalCallAsync, agentCallback: ?AgentCallback, taskCallback: ?Callback) {
+    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, /*localCallAsync: LocalCallAsync,*/ agentCallback: ?AgentCallback, taskCallback: ?Callback) {
         var tasks = Deque.empty<(Ttid, Task)>(); /*fix*/
         var index : Nat = 1;
         var firstIndex : Nat = 1;
@@ -352,7 +351,7 @@ module {
         // private func _run() : async Nat {
         // };
 
-        public func done(_ttid: Ttid, _toCallback: Bool) : async ?Ttid{
+        public func done(_ttid: Ttid, _toCallback: Bool) : async* ?Ttid{
             var status: Status = #Done;
             switch(taskLogs.get(_ttid)){
                 case(?(log)){
@@ -362,25 +361,25 @@ module {
                             switch(agentCallback){
                                 case(?(_agentCallback)){
                                     try{
-                                        countAsyncMessage += 2;
-                                        await _agentCallback(_ttid, log.task, (#Done, null, null));
+                                        await* _agentCallback(_ttid, log.task, (#Done, null, null));
                                         callbackStatus := ?#Done;
-                                        countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                     } catch(e){
                                         callbackStatus := ?#Error;
                                         status := #Error;
-                                        countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                     };
                                 };
                                 case(_){
                                     switch(taskCallback){
                                         case(?(_taskCallback)){
                                             try{
-                                                _taskCallback(_ttid, log.task, (#Done, null, null));
+                                                countAsyncMessage += 2;
+                                                await _taskCallback("", _ttid, log.task, (#Done, null, null));
                                                 callbackStatus := ?#Done;
+                                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                             } catch(e){
                                                 callbackStatus := ?#Error;
                                                 status := #Error;
+                                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                             };
                                         };
                                         case(_){};
@@ -416,7 +415,7 @@ module {
         public func removeByOid(_toid: Toid) : [Ttid]{
             return _removeByOid(_toid);
         };
-        public func run() : async Nat{
+        public func run() : async* Nat{
             var size: Nat = _size();
             var count: Nat = 0;
             var callCount: Nat = 0;
@@ -499,17 +498,17 @@ module {
                             var domain: CallType.Domain = #Canister(task.callee, task.cycles);
                             switch(task.callType){
                                 case(#This(method)){ domain := #Local(localCall); };
-                                case(#ThisAsync(method)){ domain := #LocalAsync(localCallAsync); };
+                                //case(#ThisAsync(method)){ domain := #Local(localCall); }; // /**comp**/
                                 case(_){};
                             };
                             var result : TaskResult = (#Doing, null,null);
                             try{
-                                countAsyncMessage += 3;
-                                result := await CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
-                                countAsyncMessage -= Nat.min(3, countAsyncMessage);
+                                countAsyncMessage += 2;
+                                result := await* CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
+                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
                             }catch(e){ 
                                 result := (#Error, null, ?{code = Error.code(e); message = Error.message(e); });
-                                countAsyncMessage -= Nat.min(3, countAsyncMessage); 
+                                countAsyncMessage -= Nat.min(2, countAsyncMessage); 
                             };
                             var callbackStatus: ?Status = null;
                             var status: Status = result.0;
@@ -519,27 +518,27 @@ module {
                                 switch(agentCallback){
                                     case(?(_agentCallback)){
                                         try{
-                                            countAsyncMessage += 2;
-                                            await _agentCallback(ttid, task, result);
+                                            await* _agentCallback(ttid, task, result);
                                             callbackStatus := ?#Done;
-                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                         } catch(e){
                                             callbackStatus := ?#Error;
                                             status := #Error;
                                             errorMsg := ?{code = Error.code(e); message = Error.message(e); };
-                                            countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                         };
                                     };
                                     case(_){
                                         switch(taskCallback){
                                             case(?(_taskCallback)){
                                                 try{ // Unable to catch error. If an error occurs, the status of this task is #Doing, and does not exist in the TaskPool
-                                                    _taskCallback(ttid, task, result);
+                                                    countAsyncMessage += 2;
+                                                    await _taskCallback("", ttid, task, result);
                                                     callbackStatus := ?#Done;
+                                                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                                 } catch(e){
                                                     callbackStatus := ?#Error;
                                                     status := #Error;
                                                     errorMsg := ?{code = Error.code(e); message = Error.message(e); };
+                                                    countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                                 };
                                             };
                                             case(_){};
@@ -616,6 +615,22 @@ module {
             return {
                 tasks = tasks;
                 taskLogs = Iter.toArray(taskLogs.entries());
+                errorLogs = Iter.toArray(errorLogs.entries());
+                callees = Iter.toArray(callees.entries());
+                index = index;
+                firstIndex = firstIndex;
+                errIndex = errIndex;
+                firstErrIndex = firstErrIndex;
+            };
+        };
+        public func getDataBase() : Data {
+            let _taskLogs = Iter.toArray(Iter.filter(taskLogs.entries(), func (x: (Ttid, TaskEvent)): Bool{
+                x.1.time + 96*3600*1000000000 > Time.now() or x.1.result.0 == #Todo or x.1.result.0 == #Doing or 
+                List.some(Iter.toList(errorLogs.vals()), func (v: ErrorLog): Bool{ x.0 == v.ttid })
+            }));
+            return {
+                tasks = tasks;
+                taskLogs = _taskLogs;
                 errorLogs = Iter.toArray(errorLogs.entries());
                 callees = Iter.toArray(callees.entries());
                 index = index;

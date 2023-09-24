@@ -28,8 +28,8 @@ module {
         data: ?Blob;
         time: Time.Time;
     };
-    public type AgentCallback = (_ttid: Ttid, _task: Task, _result: TaskResult) -> async ();
-    public type Callback = (_ttid: Ttid, _task: Task, _result: TaskResult) -> ();
+    public type AgentCallback = (_ttid: Ttid, _task: Task, _result: TaskResult) -> async* ();
+    public type Callback = (_toName: Text, _ttid: Ttid, _task: Task, _result: TaskResult) -> async ();
     public type TaskEvent = {
         toid: ?Toid;
         ttid: Ttid;

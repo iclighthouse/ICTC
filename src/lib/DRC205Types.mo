@@ -6,6 +6,7 @@
 import Principal "mo:base/Principal";
 import Array "mo:base/Array";
 import Nat32 "mo:base/Nat32";
+import Nat64 "mo:base/Nat64";
 import Blob "mo:base/Blob";
 import Time "mo:base/Time";
 import Binary "Binary";
@@ -17,6 +18,7 @@ module {
   public type Txid = Blob;
   public type AccountId = Blob;
   public type AppId = Principal;
+  public type BucketId = Principal;
   public type CyclesWallet = Principal;
   public type Nonce = Nat;
   public type Data = Blob;
@@ -66,8 +68,8 @@ module {
     };
   public type TxnRecord = {
         txid: Txid;
-        msgCaller: ?Principal;
-        caller: AccountId;
+        msgCaller: ?Principal; // means Owner for ICRC1 Account
+        caller: AccountId; // means Subaccount for ICRC1 Account
         operation: OperationType;
         account: AccountId;
         cyclesWallet: ?CyclesWallet;
@@ -106,15 +108,22 @@ module {
     storeBatch : shared (_txns: [TxnRecord]) -> async (); 
     storeBytes: shared (_txid: Txid, _data: [Nat8]) -> async (); 
     storeBytesBatch: shared (_txns: [(_txid: Txid, _data: [Nat8])]) -> async (); 
-    bucket : shared query (_app: AppId, _txid: Txid, _step: Nat, _version: ?Nat8) -> async (bucket: ?Principal);
+    bucket : shared query (_app: AppId, _txid: Txid, _step: Nat, _version: ?Nat8) -> async (bucket: ?BucketId);
+    bucketByIndex : shared query (_app: AppId, _blockIndex: Nat, _step: Nat, _version: ?Nat8) -> async (bucket: ?BucketId);
+    location : shared query (_app: AppId, _arg: {#txid: Txid; #index: Nat; #account: AccountId}, _version: ?Nat8) -> async [BucketId];
+    bucketList : shared query () -> async [BucketId];
   };
   public type Bucket = actor {
     txnBytes: shared query (_app: AppId, _txid: Txid) -> async ?([Nat8], Time.Time);
     txnBytesHistory: shared query (_app: AppId, _txid: Txid) -> async [([Nat8], Time.Time)];
     txn: shared query (_app: AppId, _txid: Txid) -> async ?(TxnRecord, Time.Time);
     txnHistory: shared query (_app: AppId, _txid: Txid) -> async [(TxnRecord, Time.Time)];
+    txnByIndex: shared query (_app: AppId, _blockIndex: Nat) -> async [(TxnRecord, Time.Time)];
+    txnByAccountId: shared query (_accountId: AccountId, _app: ?AppId, _page: ?Nat32/*start from 1*/, _size: ?Nat32) -> async 
+    {data: [(AppId, [(TxnRecord, Time.Time)])]; totalPage: Nat; total: Nat};
     txnHash: shared query (_app: AppId, _txid: Txid, _index: Nat) -> async ?Text;
-    txnBytesHash: shared query (_app: AppId, _txid: Txid, _index: Nat) -> async ?Text;
+    txnHash2: shared query (_app: AppId, _txid: Txid, _merge: Bool) -> async [Text];
+    // txnBytesHash: shared query (_app: AppId, _txid: Txid, _index: Nat) -> async ?Text;
   };
   public type Impl = actor {
     drc205_getConfig : shared query () -> async Setting;
@@ -137,9 +146,11 @@ module {
     let appType: [Nat8] = [83:Nat8, 87, 65, 80]; //SWAP
     let canister: [Nat8] = Blob.toArray(Principal.toBlob(_app));
     let caller: [Nat8] = Blob.toArray(_caller);
-    let nonce: [Nat8] = Binary.BigEndian.fromNat32(Nat32.fromNat(_nonce));
-    let txInfo = arrayAppend(arrayAppend(arrayAppend(appType, canister), caller), nonce);
+    let nonce32: [Nat8] = Binary.BigEndian.fromNat32(Nat32.fromIntWrap(_nonce));
+    let nonce64: [Nat8] = Binary.BigEndian.fromNat64(Nat64.fromIntWrap(_nonce));
+    let nat32Max: Nat = 2**32 - 1;
+    let txInfo = arrayAppend(arrayAppend(arrayAppend(appType, canister), caller), if (_nonce <= nat32Max){ nonce32 }else{ nonce64 });
     let h224: [Nat8] = SHA224.sha224(txInfo);
-    return Blob.fromArray(arrayAppend(nonce, h224));
+    return Blob.fromArray(arrayAppend(nonce32, h224));
   };
 }

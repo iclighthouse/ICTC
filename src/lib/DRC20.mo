@@ -97,11 +97,31 @@ module {
     drc20_approvals : shared query Address -> async [Allowance];
     drc20_approve : shared (Spender, Amount, ?Nonce, ?Sa, ?Data) -> async TxnResult;
     drc20_balanceOf : shared query Address -> async Amount;
+    //drc20_cyclesBalanceOf : shared query Address -> async Nat;
+    //drc20_cyclesReceive : shared ?Address -> async Nat;
     drc20_decimals : shared query () -> async Nat8;
     drc20_executeTransfer : shared (Txid, ExecuteType, ?To, ?Nonce, ?Sa, ?Data) -> async TxnResult;
+    //drc20_gas : shared query () -> async Gas;
     drc20_fee : shared query () -> async Amount;
-    drc20_lockTransfer : shared (To, Amount, Timeout, ?Decider, ?Nonce, ?Sa, ?Data) -> async TxnResult;
-    drc20_lockTransferFrom : shared (From, To, Amount, Timeout, ?Decider, ?Nonce, ?Sa, ?Data) -> async TxnResult;
+    drc20_lockTransfer : shared (
+        To,
+        Amount,
+        Timeout,
+        ?Decider, 
+        ?Nonce,
+        ?Sa,
+        ?Data,
+      ) -> async TxnResult;
+    drc20_lockTransferFrom : shared (
+        From,
+        To,
+        Amount,
+        Timeout,
+        ?Decider, 
+        ?Nonce,
+        ?Sa,
+        ?Data,
+      ) -> async TxnResult;
     drc20_metadata : shared query () -> async [Metadata];
     drc20_name : shared query () -> async Text;
     drc20_subscribe : shared (Callback, [MsgType], ?Sa) -> async Bool;
@@ -110,11 +130,18 @@ module {
     drc20_totalSupply : shared query () -> async Amount;
     drc20_transfer : shared (To, Amount, ?Nonce, ?Sa, ?Data) -> async TxnResult;
     drc20_transferBatch : shared ([To], [Amount], ?Nonce, ?Sa, ?Data) -> async [TxnResult];
-    drc20_transferFrom : shared (From, To, Amount, ?Nonce, ?Sa, ?Data) -> async TxnResult;
+    drc20_transferFrom : shared (
+        From,
+        To,
+        Amount, 
+        ?Nonce,
+        ?Sa,
+        ?Data,
+      ) -> async TxnResult;
     drc20_txnQuery : shared query TxnQueryRequest -> async TxnQueryResponse;
     drc20_txnRecord : shared (Txid) -> async ?TxnRecord;
     drc20_getCoinSeconds : shared query ?Address -> async (CoinSeconds, ?CoinSeconds);
     drc20_dropAccount : shared (?Sa) -> async Bool;
-    drc20_holdersCount : shared query () -> async (balances: Nat, nonces: Nat, dropedAccounts: Nat);
+    drc20_holdersCount : shared query () -> async (balances: Nat, nonces: Nat, droppedAccounts: Nat);
   }
 }

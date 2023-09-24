@@ -76,8 +76,11 @@ Transaction Compensator的功能在Transaction Manager中一起实现，其作�
 - ICTC Framework Beta Version  (done)
 - ICTC Framework v1.0  (done)
 - ICTC Framework v1.5  (done)
+- ICTC Framework v2.0  (done)
 
 ## 文档
+
+[ICTC v2.0 Reference](./docs/ictc_reference-2.0.md)
 
 [ICTC v1.5 Reference](./docs/ictc_reference-1.5.md)
 
@@ -99,7 +102,6 @@ Transaction Compensator的功能在Transaction Manager中一起实现，其作�
 
 - [ICDex](http://icdex.io) (Orderbook DEX)
 - [ICSwap](http://icswap.io) (AMM DEX)
-- [ICOracle](http://icoracle.io) (Decentralized oracle protocol)
 
 ## Community
 
