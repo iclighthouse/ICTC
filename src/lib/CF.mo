@@ -83,14 +83,17 @@ module {
         updateTime: Timestamp; 
     };
     public type Liquidity2 = {
-        value0: Nat;
-        value1: Nat;
+        token0: Nat;
+        token1: Nat;
         shares: Shares;
-        shareWeighted: ShareWeighted;
+        shareWeighted: { shareTimeWeighted: Nat; updateTime: Timestamp; };
         unitValue: (value0: Nat, value1: Nat);
         vol: Vol2;
+        price: Nat;
+        unitSize: Nat;
         priceWeighted: PriceWeighted2;
-        swapCount: Nat64;
+        orderCount: Nat64;
+        userCount: Nat64;
     };
 
     public type FeeStatus = {
