@@ -7,22 +7,22 @@
  * Refers     : https://github.com/iclighthouse/ICTC
  */
 
-import Bitcoin "./lib/Bitcoin";
+import Bitcoin "mo:icl/Bitcoin";
 import Blob "mo:base/Blob";
-import CF "./lib/CF";
+import CF "mo:icl/CF";
 import Cycles "mo:base/ExperimentalCycles";
-import CyclesWallet "./lib/CyclesWallet";
-import DRC20 "./lib/DRC20";
-import DIP20 "./lib/DIP20";
-import ICRC1 "./lib/ICRC1";
-import ICRC2 "./lib/ICRC1";
-import ICTokens "./lib/ICTokens";
-import ICSwap "./lib/ICSwap";
-import ICDex "./lib/ICDexTypes";
+import CyclesWallet "mo:icl/CyclesWallet";
+import DRC20 "mo:icl/DRC20";
+import DIP20 "mo:icl/DIP20";
+import ICRC1 "mo:icl/ICRC1";
+import ICRC2 "mo:icl/ICRC1";
+import ICTokens "mo:icl/ICTokens";
+import ICSwap "mo:icl/ICSwap";
+import ICDex "mo:icl/ICDexTypes";
 import Result "mo:base/Result";
 import Error "mo:base/Error";
-import IC "./lib/IC";
-import Ledger "./lib/Ledger";
+import IC "mo:icl/IC";
+import Ledger "mo:icl/Ledger";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
@@ -78,7 +78,7 @@ module {
             #start_canister: { canister_id: Principal; };
             #stop_canister: { canister_id: Principal; };
             #update_settings: { canister_id : Principal; settings : IC.canister_settings; };
-            #http_request: IC.CanisterHttpRequestArgs;
+            #http_request: IC.HttpRequestArgs;
         }; 
         #Bitcoin: {
             #bitcoin_get_balance : Bitcoin.GetBalanceRequest;
@@ -193,7 +193,7 @@ module {
             #start_canister: ();
             #stop_canister: ();
             #update_settings: ();
-            #http_request: IC.CanisterHttpResponsePayload
+            #http_request: IC.HttpResponsePayload
         }; 
         #Bitcoin : {
             #bitcoin_get_balance : Bitcoin.Satoshi;
@@ -439,7 +439,7 @@ module {
                                 };
                             };
                             case(#http_request(args)){
-                                var result: IC.CanisterHttpResponsePayload = {
+                                var result: IC.HttpResponsePayload = {
                                     status = 0;
                                     headers = [];
                                     body = [];

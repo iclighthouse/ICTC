@@ -1,12 +1,12 @@
 {
   "canisters": {
     "TokenA": {
-      "main": "./examples/token/TokenA.mo",
+      "main": "./examples/token/Token.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     },
     "TokenB": {
-      "main": "./examples/token/TokenB.mo",
+      "main": "./examples/token/Token.mo",
       "type": "motoko",
       "args" : "--compacting-gc"
     },
@@ -21,6 +21,11 @@
       "args" : "--compacting-gc"
     }
     
+  },
+  "defaults": {
+    "build": {
+      "packtool": "vessel sources"
+    }
   },
   "networks": {
     "ic": {

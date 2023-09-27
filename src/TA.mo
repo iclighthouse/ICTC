@@ -22,8 +22,8 @@ import TrieMap "mo:base/TrieMap";
 import TATypes "TATypes";
 import TaskHash "TaskHash";
 import Nat64 "mo:base/Nat64";
-import Binary "./lib/Binary";
-import ICRC1 "./lib/ICRC1";
+import Binary "mo:icl/Binary";
+import ICRC1 "mo:icl/ICRC1";
 import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 

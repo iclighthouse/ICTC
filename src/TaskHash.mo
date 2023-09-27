@@ -12,9 +12,9 @@ import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Option "mo:base/Option";
 import Text "mo:base/Text";
-import Binary "lib/Binary";
-import SHA224 "lib/SHA224";
-import CRC32 "lib/CRC32";
+import Binary "mo:icl/Binary";
+import SHA224 "mo:sha224/SHA224";
+import CRC32 "mo:icl/CRC32";
 import TA "TATypes";
 
 module {
