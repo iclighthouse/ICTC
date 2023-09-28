@@ -624,6 +624,21 @@ module {
             };
             return callbackStatus;
         };
+        private func _getTtids(_toid: Toid): [Ttid]{
+            var res : [Ttid] = [];
+            switch(orders.get(_toid)){
+                case(?(order)){
+                    for (task in List.toArray(order.tasks).vals()){ 
+                        res := TA.arrayAppend(res, [task.ttid]);
+                    };
+                    for (comp in List.toArray(order.comps).vals()){ 
+                        res := TA.arrayAppend(res, [comp.tcid]);
+                    };
+                };
+                case(_){};
+            };
+            return res;
+        };
         private func _setStatus(_toid: Toid, _setting: OrderStatus) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -1093,6 +1108,21 @@ module {
                 try{
                     await* _statusTest(_toid);
                 }catch(e){};
+            };
+            return _status(_toid);
+        };
+        public func runSync(_toid: Toid) : async ?OrderStatus{ 
+            switch(_status(_toid)){
+                case(?(#Todo)){ _setStatus(_toid, #Preparing); };
+                case(_){};
+            };
+            let actuations = actuator().actuations();
+            if (actuations.actuationThreads > 10){
+                throw Error.reject("ICTC execution threads exceeded the limit.");
+            };
+            let count = await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
+            if (_toid > 0){
+                try{ await* _statusTest(_toid); }catch(e){};
             };
             return _status(_toid);
         };

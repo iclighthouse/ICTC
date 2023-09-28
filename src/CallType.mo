@@ -323,6 +323,41 @@ module {
         };
         return txid_;
     };
+    private func _rebuildICRC1TransferArgs(_callType: CallType): CallType{
+        switch(_callType){
+            case(#ICRC1(#icrc1_transfer(args))){
+                var from_subaccount = args.from_subaccount;
+                var to_subaccount = args.to.subaccount;
+                switch(to_subaccount){
+                    case(?(_sub)){
+                        if (Blob.toArray(_sub).size() == 0) {
+                            to_subaccount := null;
+                        };
+                    };
+                    case(_){};
+                };
+                switch(from_subaccount){
+                    case(?(_sub)){
+                        if (Blob.toArray(_sub).size() == 0) {
+                            from_subaccount := null;
+                        };
+                    };
+                    case(_){};
+                };
+                return #ICRC1(#icrc1_transfer({
+                    from_subaccount = from_subaccount;
+                    to = {owner = args.to.owner; subaccount = to_subaccount };
+                    amount = args.amount;
+                    fee = args.fee;
+                    memo = args.memo;
+                    created_at_time = args.created_at_time;
+                }: ICRC1.TransferArgs));
+            };
+            case(_){
+                return _callType;
+            };
+        };
+    };
 
     /// Wrap the calling function
     public func call(_args: CallType, _domain: Domain, _receipt: ?Receipt) : async* TaskResult{
@@ -359,7 +394,8 @@ module {
             // Cross-Canister Task Call
             case(#Canister((callee, cycles))){
                 var calleeId = Principal.toText(callee);
-                switch(_args){
+                let args = _rebuildICRC1TransferArgs(_args);
+                switch(args){
                     case(#__skip){ return (#Done, ?#__skip, null); };
                     case(#__block){ return (#Error, ?#__block, ?{code=#future(9904); message="Blocked by code."; }); };
                     case(#IC(method)){

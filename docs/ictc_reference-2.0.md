@@ -200,6 +200,8 @@ public func close(_toid: Toid) : ()
 
 public func run(_toid: Toid) : async ?OrderStatus
 
+public func runSync(_toid: Toid) : async ?OrderStatus
+
 public func asyncMessageSize() : Nat
 
 public func count() : Nat
@@ -263,6 +265,8 @@ public func open(_toid: Toid) : ()
 public func close(_toid: Toid) : ()
 
 public func run(_toid: Toid) : async ?OrderStatus
+
+public func runSync(_toid: Toid) : async ?OrderStatus
 
 public func asyncMessageSize() : Nat
 
