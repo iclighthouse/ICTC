@@ -425,7 +425,7 @@ module {
             var receipt: ?CallType.Receipt = null;
             var ttids: [Ttid] = Option.get(_ttids, []);
             actuationThreads += 1;
-            while (count < limitNum * (if (ttids.size() == 0){ 1 }else{ 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
+            while (count < (if (ttids.size() == 0){ limitNum }else{ size * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
                 lastActuationTime := Time.now();
                 switch(Deque.popFront(tasks)){
                     case(?((ttid, task_), deque)){
