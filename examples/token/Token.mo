@@ -32,8 +32,8 @@ import Trie "mo:base/Trie";
 import Types "mo:icl/DRC20";
 import ICRC1 "mo:icl/ICRC1";
 
-//record { totalSupply=1000000000000; decimals=8; fee=10; name=opt "TokenTest"; symbol=opt "TTT"; metadata=null; founder=null;} 
-shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
+//record { totalSupply=1000000000000; decimals=8; fee=10; name=opt "TokenTest"; symbol=opt "TTT"; metadata=null; founder=null;}, true
+shared(installMsg) actor class DRC20(initArgs: Types.InitArgs, enDebug: Bool) = this {
     /*
     * Types 
     */
@@ -71,7 +71,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
     private stable var NonceStartBase: Nat = 10000000;
     private stable var NonceMode: Nat = 0; // Nonce mode is turned on when there is not enough storage space or when the nonce value of a single user exceeds `NonceStartBase`.
     private stable var AllowanceLimit: Nat = 50;
-    private let MAX_MEMORY: Nat = 31*1024*1024*1024; // 31G
+    private let MAX_MEMORY: Nat = 1500*1000*1000; // 1.5G
 
     /* 
     * State Variables 
@@ -92,7 +92,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
     private stable var allowances: Trie.Trie2D<AccountId, AccountId, Nat> = Trie.empty(); // Limit 50 records per account
     // private stable var cyclesBalances: Trie.Trie<AccountId, Nat> = Trie.empty();
     // Set EN_DEBUG=false in the production environment.
-    private var drc202 = DRC202.DRC202({EN_DEBUG = true; MAX_CACHE_TIME = 3 * 30 * 24 * 3600 * 1000000000; MAX_CACHE_NUMBER_PER = 100; MAX_STORAGE_TRIES = 2; }, standard_);
+    private var drc202 = DRC202.DRC202({EN_DEBUG = enDebug; MAX_CACHE_TIME = 3 * 30 * 24 * 3600 * 1000000000; MAX_CACHE_NUMBER_PER = 100; MAX_STORAGE_TRIES = 2; }, standard_);
     private stable var drc202_lastStorageTime : Time.Time = 0;
     private var pubsub = ICPubSub.ICPubSub<MsgType>({ MAX_PUBLICATION_TRIES = 2 }, func (t1:MsgType, t2:MsgType): Bool{ t1 == t2 });
     private stable var icps_lastPublishTime : Time.Time = 0;
@@ -409,7 +409,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         let value = _value; 
         var gas: Gas = #token(fee_);
         var allowed: Nat = 0; // *
-        var spendValue = _value; // *
+        var spendValue = _value + fee_; // *
         if (_isAllowance){
             allowed := _getAllowance(from, caller);
         };
@@ -456,7 +456,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                     case(#send){
                         if (not(_send(from, to, value, true))){
                             return #err({ code=#InsufficientBalance; message="Insufficient Balance"; });
-                        } else if (_isAllowance and allowed < spendValue){
+                        } else if (_isAllowance and (allowed < spendValue or allowed == 0)){
                             return #err({ code=#InsufficientAllowance; message="Insufficient Allowance"; });
                         };
                         ignore _send(from, to, value, false);
@@ -478,7 +478,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                     case(#burn){
                         if (not(_burn(from, value, true))){
                             return #err({ code=#InsufficientBalance; message="Insufficient Balance"; });
-                        } else if (_isAllowance and allowed < spendValue){
+                        } else if (_isAllowance and (allowed < spendValue or allowed == 0)){
                             return #err({ code=#InsufficientAllowance; message="Insufficient Allowance"; });
                         };
                         ignore _burn(from, value, false);
@@ -493,10 +493,10 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                 };
             };
             case(#lockTransfer(operation)){
-                spendValue := operation.locked;
+                spendValue := operation.locked + fee_;
                 if (not(_lock(from, operation.locked, true))){
                     return #err({ code=#InsufficientBalance; message="Insufficient Balance"; });
-                } else if (_isAllowance and allowed < spendValue){
+                } else if (_isAllowance and (allowed < spendValue or allowed == 0)){
                     return #err({ code=#InsufficientAllowance; message="Insufficient Allowance"; });
                 };
                 ignore _lock(from, operation.locked, false);
@@ -938,7 +938,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         switch(drc202.get(_txid)){
             case(?(txn)){ return ?txn; };
             case(_){
-                return await drc202.get2(Principal.fromActor(this), _txid);
+                return await* drc202.get2(Principal.fromActor(this), _txid);
             };
         };
     };
@@ -1035,7 +1035,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
                     if (_isSpender){ #TransferFromErr(#CreatedInFuture({ ledger_time = Nat64.fromIntWrap(Time.now()) })) } 
                     else { #TransferErr(#CreatedInFuture({ ledger_time = Nat64.fromIntWrap(Time.now()) })) };
                 }else{
-                    let events = drc202.getEvents(?caller);
+                    let events = drc202.getEvents(?caller, null, null).0;
                     switch(Array.find(events, func (txn: TxnRecord): Bool{
                         txn.timestamp + PERMITTED_DRIFT >= Time.now() and txn.timestamp <= Time.now() + PERMITTED_DRIFT and 
                         txn.caller == caller and txn.transaction.from == _from and txn.transaction.to == _to and txn.transaction.value == _value and txn.transaction.data == _data
@@ -1263,11 +1263,11 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         let to = _icrc1_get_account(_args.to);
         let value = _args.amount;
         let data = _args.memo;
-        switch(_icrc1_idempotency(_args.created_at_time, msg.caller, from, to, value, null, null, data, true)){
+        switch(_icrc1_idempotency(_args.created_at_time, msg.caller, from, to, value, null, _toSaNat8(_args.spender_subaccount), data, true)){
             case(#TransferFromErr(err)){ return #Err(err); };
             case(_){};
         };
-        let res = __transferFrom(msg.caller, from, to, value, null, null, data, true);
+        let res = __transferFrom(msg.caller, from, to, value, null, _toSaNat8(_args.spender_subaccount), data, true);
         // publish
         if (pubsub.threads() == 0 or Time.now() > icps_lastPublishTime + 60*1000000000){
             icps_lastPublishTime := Time.now();
@@ -1302,8 +1302,19 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
     /// returns events
     public query func drc202_events(_account: ?DRC202.Address) : async [DRC202.TxnRecord]{
         switch(_account){
-            case(?(account)){ return drc202.getEvents(?_getAccountId(account)); };
-            case(_){return drc202.getEvents(null);}
+            case(?(account)){ return drc202.getEvents(?_getAccountId(account), null, null).0; };
+            case(_){return drc202.getEvents(null, null, null).0;}
+        };
+    };
+    /// returns events filtered by time
+    public query func drc202_events_filter(_account: ?DRC202.Address, _startTime: ?Time.Time, _endTime: ?Time.Time) : async (data: [DRC202.TxnRecord], mayHaveArchived: Bool){
+        switch(_account){
+            case(?(account)){ 
+                return drc202.getEvents(?_getAccountId(account), _startTime, _endTime);
+            };
+            case(_){
+                return drc202.getEvents(null, _startTime, _endTime);
+            }
         };
     };
     /// returns txn record. It's an query method that will try to find txn record in token canister cache.
@@ -1315,7 +1326,7 @@ shared(installMsg) actor class DRC20(initArgs: Types.InitArgs) = this {
         switch(drc202.get(_txid)){
             case(?(txn)){ return ?txn; };
             case(_){
-                return await drc202.get2(Principal.fromActor(this), _txid);
+                return await* drc202.get2(Principal.fromActor(this), _txid);
             };
         };
     };
