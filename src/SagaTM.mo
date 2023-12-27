@@ -1,5 +1,5 @@
 /**
- * Module     : SagaTM.mo v2.0
+ * Module     : SagaTM.mo v3.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Saga Transaction Manager.
@@ -20,100 +20,100 @@ import TA "./TA";
 import Error "mo:base/Error";
 
 module {
-    public let Version: Nat = 8;
+    public let Version: Nat = 10;
     public type Toid = Nat;
     public type Ttid = TA.Ttid;
     public type Tcid = TA.Ttid;
     public type Callee = TA.Callee;
-    public type CallType = TA.CallType;
+    public type CallType<T> = TA.CallType<T>;
     public type Receipt = TA.Receipt;
-    public type Task = TA.Task;
+    public type Task<T> = TA.Task<T>;
     public type Status = TA.Status;
-    public type Callback = TA.Callback;
-    public type LocalCall = TA.LocalCall;
-    //public type LocalCallAsync = TA.LocalCallAsync;
+    public type TaskCallback<T> = TA.TaskCallback<T>;
+    public type CustomCall<T> = TA.CustomCall<T>;
     public type TaskResult = TA.TaskResult;
-    public type TaskEvent = TA.TaskEvent;
+    public type TaskEvent<T> = TA.TaskEvent<T>;
     public type ErrorLog = TA.ErrorLog;
     public type CalleeStatus = TA.CalleeStatus;
     public type Settings = {attemptsMax: ?TA.Attempts; recallInterval: ?Int; data: ?Blob};
     public type OrderStatus = {#Todo; #Doing; #Compensating; #Blocking; #Done; #Recovered;};
-    public type Compensation = Task;
+    public type Compensation<T> = Task<T>;
     public type CompStrategy = { #Forward; #Backward; };
     public type OrderCallback = (_toName: Text, _toid: Toid, _status: OrderStatus, _data: ?Blob) -> async ();
-    public type PushTaskRequest = {
+    public type PushTaskRequest<T> = {
         callee: Callee;
-        callType: CallType;
+        callType: CallType<T>;
         preTtid: [Ttid];
         attemptsMax: ?Nat;
         recallInterval: ?Int; // nanoseconds
         cycles: Nat;
         data: ?Blob;
     };
-    public type PushCompRequest = PushTaskRequest;
-    public type SagaTask = {
+    public type PushCompRequest<T> = PushTaskRequest<T>;
+    public type SagaTask<T> = {
         ttid: Ttid;
-        task: Task;
-        comp: ?Compensation; // for auto compensation
+        task: Task<T>;
+        comp: ?Compensation<T>; // for auto compensation
         status: Status;
     };
-    public type CompTask = {
+    public type CompTask<T> = {
         forTtid: Ttid;
         tcid: Tcid;
-        comp: Compensation;
+        comp: Compensation<T>;
         status: Status;
     };
-    public type Order = {
+    public type Order<T> = {
         name: Text;
         compStrategy: CompStrategy;
-        tasks: List.List<SagaTask>;
+        tasks: List.List<SagaTask<T>>;
         allowPushing: {#Opening; #Closed;};
-        comps: List.List<CompTask>;
+        comps: List.List<CompTask<T>>;
         status: OrderStatus;  // *
         callbackStatus: ?Status;
         time: Time.Time;
         data: ?Blob;
     };
-    public type Data = {
+    public type Data<T> = {
         autoClearTimeout: Int; 
         index: Nat; 
         firstIndex: Nat; 
-        orders: [(Toid, Order)]; 
+        orders: [(Toid, Order<T>)]; 
         aliveOrders: List.List<(Toid, Time.Time)>; 
         taskEvents: [(Toid, [Ttid])];
-        //taskCallback: [(Ttid, Callback)]; 
-        //orderCallback: [(Toid, OrderCallback)]; 
-        actuator: TA.Data; 
+        actuator: TA.Data<T>; 
     };
 
-    public class SagaTM(this: Principal, localCall: ?LocalCall, /*localCallAsync: ?LocalCallAsync,*/ defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
+    /// ## Transaction Manager for Saga mode.
+    /// - Transaction Order: is a complete transaction containing one or more tasks.
+    /// - Transaction Task: is a task within a transaction that is required to be data consistent internally (atomicity) and 
+    /// preferably acceptable for multiple attempts without repeated execution (idempotence).
+    public class SagaTM<T>(this: Principal, call: ?CustomCall<T>, defaultTaskCallback: ?TaskCallback<T>, defaultOrderCallback: ?OrderCallback) {
         let limitAtOnce: Nat = 200;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
-        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, TA.natHash);
+        var orders = TrieMap.TrieMap<Toid, Order<T>>(Nat.equal, TA.natHash);
         var aliveOrders = List.nil<(Toid, Time.Time)>();
         var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, TA.natHash);
-        var actuator_: ?TA.TA = null;
-        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash); /*fix*/
+        var actuator_: ?TA.TA<T> = null;
+        var taskCallback = TrieMap.TrieMap<Ttid, TaskCallback<T>>(Nat.equal, TA.natHash); /*fix*/
         var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, TA.natHash);
         var countAsyncMessage : Nat = 0;
-        private func actuator() : TA.TA {
+
+        private func actuator() : TA.TA<T> {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
                 case(_){
-                    let localCall_ = Option.get(localCall, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    //let localCallAsync_ = Option.get(localCallAsync, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    let act = TA.TA(limitAtOnce, autoClearTimeout, this, localCall_, /*localCallAsync_,*/ ?_taskCallbackProxy, null);
+                    let call_ = Option.get(call, func (callee: Principal, cycles: Nat, ct: CallType<T>, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
+                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, this, call_, ?_taskCallbackProxy, null);
                     actuator_ := ?act;
                     return act;
                 };
             };
-            
         };
 
         // Unique callback entrance. This function will call each specified callback of task
-        private func _taskCallbackProxy(_ttid: Ttid, _task: Task, _result: TaskResult) : async* (){
+        private func _taskCallbackProxy(_ttid: Ttid, _task: Task<T>, _result: TaskResult) : async* (){
             let toid = Option.get(_task.toid, 0);
             switch(_status(toid)){
                 case(?(#Todo)){ _setStatus(toid, #Doing); };
@@ -232,7 +232,7 @@ module {
         private func _inAliveOrders(_toid: Toid): Bool{
             return Option.isSome(List.find(aliveOrders, func (item: (Toid, Time.Time)): Bool{ item.0 == _toid }));
         };
-        private func _pushOrder(_toid: Toid, _order: Order): (){
+        private func _pushOrder(_toid: Toid, _order: Order<T>): (){
             orders.put(_toid, _order);
             _clear(null, false);
         };
@@ -277,7 +277,7 @@ module {
             };
         };
 
-        private func _taskFromRequest(_toid: Toid, _task: PushTaskRequest, _autoAddPreTtid: Bool) : TA.Task{
+        private func _taskFromRequest(_toid: Toid, _task: PushTaskRequest<T>, _autoAddPreTtid: Bool) : TA.Task<T>{
             var preTtid = _task.preTtid;
             let lastTtid = Option.get(_orderLastTid(_toid), 0);
             if (_autoAddPreTtid and Option.isNull(Array.find(preTtid, func (ttid:Ttid):Bool{ttid == lastTtid})) and lastTtid > 0){
@@ -296,8 +296,8 @@ module {
                 time = Time.now();
             };
         };
-        private func _compFromRequest(_toid: Toid, _forTtid: ?Ttid, _comp: ?PushCompRequest) : ?Compensation{
-            var comp: ?Compensation = null;
+        private func _compFromRequest(_toid: Toid, _forTtid: ?Ttid, _comp: ?PushCompRequest<T>) : ?Compensation<T>{
+            var comp: ?Compensation<T> = null;
             switch(_comp){
                 case(?(compensation)){
                     comp := ?{
@@ -338,7 +338,7 @@ module {
         //         case(_){ return false; };
         //     };
         // };
-        private func _putTask(_toid: Toid, _sagaTask: SagaTask) : (){
+        private func _putTask(_toid: Toid, _sagaTask: SagaTask<T>) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
                     assert(order.allowPushing == #Opening);
@@ -362,10 +362,10 @@ module {
                 aliveOrders := List.push((_toid, Time.now()), aliveOrders);
             };
         };
-        private func _updateTask(_toid: Toid, _sagaTask: SagaTask) : (){
+        private func _updateTask(_toid: Toid, _sagaTask: SagaTask<T>) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
-                    let tasks = List.map(order.tasks, func (t:SagaTask):SagaTask{
+                    let tasks = List.map(order.tasks, func (t:SagaTask<T>):SagaTask<T>{
                         if (t.ttid == _sagaTask.ttid){ _sagaTask } else { t };
                     });
                     let orderNew = {
@@ -390,7 +390,7 @@ module {
         private func _removeTask(_toid: Toid, _ttid: Ttid) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
-                    let tasks = List.filter(order.tasks, func (t:SagaTask): Bool{ t.ttid != _ttid });
+                    let tasks = List.filter(order.tasks, func (t:SagaTask<T>): Bool{ t.ttid != _ttid });
                     let orderNew = {
                         name = order.name;
                         compStrategy = order.compStrategy;
@@ -464,7 +464,7 @@ module {
                 case(_){ return false; };
             };
         };
-        /// Set the status of TO to #Done. If an error occurs and cannot be caught, the status of TO is #Doing
+        // Set the status of TO to #Done. If an error occurs and cannot be caught, the status of TO is #Doing
         private func _orderComplete(_toid: Toid) : async* ?Status{
             var callbackStatus : ?Status = null;
             switch(orders.get(_toid)){
@@ -567,10 +567,10 @@ module {
                 case(_){};
             };
         };
-        // private func _getTask(_toid: Toid, _ttid: Ttid) : ?SagaTask{
+        // private func _getTask(_toid: Toid, _ttid: Ttid) : ?SagaTask<T>{
         //     switch(orders.get(_toid)){
         //         case(?(order)){
-        //             return List.find(order.tasks, func (t:SagaTask): Bool{ t.ttid == _ttid });
+        //             return List.find(order.tasks, func (t:SagaTask<T>): Bool{ t.ttid == _ttid });
         //         };
         //         case(_){ return null; };
         //     };
@@ -670,10 +670,10 @@ module {
         //         case(_){ return false; };
         //     };
         // };
-        private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Compensation, _preTtid: ?[Ttid]) : Tcid{
+        private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Compensation<T>, _preTtid: ?[Ttid]) : Tcid{
             if (not(_inOrders(_toid))){ return 0; };
             let preTtid = Option.get(_orderLastCid(_toid), 0);
-            let task: Task = {
+            let task: Task<T> = {
                 callee = _comp.callee;
                 callType = _comp.callType;
                 preTtid = Option.get(_preTtid, [preTtid]);
@@ -686,7 +686,7 @@ module {
                 time = Time.now();
             };
             let cid = actuator().push(task);
-            let compTask: CompTask = {
+            let compTask: CompTask<T> = {
                 forTtid = _ttid;
                 tcid = cid;
                 comp = task;
@@ -727,7 +727,7 @@ module {
                                             let cid = _pushComp(_toid, task.ttid, comp, null);
                                         };
                                         case(_){ // to block
-                                            let comp: Compensation = {
+                                            let comp: Compensation<T> = {
                                                 callee = task.task.callee;
                                                 callType = #__block;
                                                 preTtid = [];
@@ -752,12 +752,12 @@ module {
                 case(_){};
             };
         };
-        // private func _setComp(_toid: Toid, _ttid: Ttid, _comp: ?Compensation) : Bool{
+        // private func _setComp(_toid: Toid, _ttid: Ttid, _comp: ?Compensation<T>) : Bool{
         //     var res : Bool = false;
         //     switch(orders.get(_toid)){
         //         case(?(order)){
         //             var tasks = order.tasks;
-        //             tasks := List.map(tasks, func (t:SagaTask): SagaTask{
+        //             tasks := List.map(tasks, func (t:SagaTask<T>): SagaTask<T>{
         //                 if (t.ttid == _ttid and Option.isNull(t.comp)){
         //                     res := true;
         //                     return {
@@ -790,7 +790,7 @@ module {
                 case(?(order)){
                     var tasks = order.tasks;
                     var comps = order.comps;
-                    tasks := List.map(tasks, func (t:SagaTask): SagaTask{
+                    tasks := List.map(tasks, func (t:SagaTask<T>): SagaTask<T>{
                         if (t.ttid == _ttid){
                             res := true;
                             return {
@@ -801,7 +801,7 @@ module {
                             };
                         } else { return t; };
                     });
-                    comps := List.map(comps, func (t:CompTask): CompTask{
+                    comps := List.map(comps, func (t:CompTask<T>): CompTask<T>{
                         if (t.tcid == _ttid){
                             res := true;
                             return {
@@ -812,7 +812,7 @@ module {
                             };
                         } else { return t; };
                     });
-                    let orderNew : Order = {
+                    let orderNew : Order<T> = {
                         name = order.name;
                         compStrategy = order.compStrategy;
                         tasks = tasks;
@@ -829,12 +829,12 @@ module {
             };
             return res;
         };
-        private func __push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _autoAddPreTtid: Bool) : Ttid{
+        private func __push(_toid: Toid, _task: PushTaskRequest<T>, _comp: ?PushCompRequest<T>, _autoAddPreTtid: Bool) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid));
-            let task: TA.Task = _taskFromRequest(_toid, _task, _autoAddPreTtid);
+            let task: TA.Task<T> = _taskFromRequest(_toid, _task, _autoAddPreTtid);
             let tid = actuator().push(task);
             let comp = _compFromRequest(_toid, ?tid, _comp);
-            let sagaTask: SagaTask = {
+            let sagaTask: SagaTask<T> = {
                 ttid = tid;
                 task = task;
                 comp = comp;
@@ -845,16 +845,18 @@ module {
         };
 
         // The following methods are used for transaction order operations.
+
+        /// Create a transaction order and return the transaction ID (toid)
         public func create(_name: Text, _compStrategy: CompStrategy, _data: ?Blob, _callback: ?OrderCallback) : Toid{
             assert(this != Principal.fromText("aaaaa-aa"));
             let toid = index;
             index += 1;
-            let order: Order = {
+            let order: Order<T> = {
                 name = _name;
                 compStrategy = _compStrategy;
-                tasks = List.nil<SagaTask>();
+                tasks = List.nil<SagaTask<T>>();
                 allowPushing = #Opening;
-                comps = List.nil<CompTask>();
+                comps = List.nil<CompTask<T>>();
                 progress = #Completed(0);
                 status = #Todo;
                 callbackStatus = null;
@@ -868,7 +870,9 @@ module {
             };
             return toid;
         };
-        public func push(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
+
+        /// Pushes a task to a specified transaction order.
+        public func push(_toid: Toid, _task: PushTaskRequest<T>, _comp: ?PushCompRequest<T>, _callback: ?TaskCallback<T>) : Ttid{
             let ttid = __push(_toid, _task, _comp, true);
             switch(_callback){
                 case(?(callback)){ taskCallback.put(ttid, callback); };
@@ -876,7 +880,9 @@ module {
             };
             return ttid;
         };
-        /// set task done   
+
+        /// Sets the status of a task to #Done. requires that the transaction order the task is in is not complete and is in #Todo, 
+        /// #Doing, or #Blocking.  
         public func taskDone(_toid: Toid, _ttid: Ttid, _toCallback: Bool) : async* ?Ttid{
             if (_inAliveOrders(_toid) and not(actuator().isInPool(_ttid)) and not(actuator().isCompleted(_ttid))){
                 switch(orders.get(_toid)){
@@ -895,6 +901,7 @@ module {
             };
             return null;
         };
+
         /// task redo
         public func redo(_toid: Toid, _ttid: Ttid) : ?Ttid{ // Warning: proceed with caution!
             if (_inAliveOrders(_toid) and not(actuator().isInPool(_ttid)) and not(actuator().isCompleted(_ttid))){
@@ -902,12 +909,12 @@ module {
                     case(?(order)){
                         if ((order.status == #Todo or order.status == #Doing or order.status == #Blocking) and not(_isTasksDone(_toid))){
                             //var taskStatus : Status = #Unknown;
-                            var task_ : ?Task = null;
-                            switch(List.find(order.tasks, func (t:SagaTask): Bool{ t.ttid == _ttid })){
+                            var task_ : ?Task<T> = null;
+                            switch(List.find(order.tasks, func (t:SagaTask<T>): Bool{ t.ttid == _ttid })){
                                 case(?(sagaTask)){ task_ := ?sagaTask.task; };
                                 case(_){};
                             };
-                            switch(List.find(order.comps, func (t:CompTask): Bool{ t.tcid == _ttid })){
+                            switch(List.find(order.comps, func (t:CompTask<T>): Bool{ t.tcid == _ttid })){
                                 case(?(compTask)){ task_ := ?compTask.comp; };
                                 case(_){};
                             };
@@ -1004,21 +1011,21 @@ module {
         public func isTaskCompleted(_ttid: Ttid) : Bool{
             return actuator().isCompleted(_ttid);
         };
-        public func getOrder(_toid: Toid) : ?Order{
+        public func getOrder(_toid: Toid) : ?Order<T>{
             return orders.get(_toid);
         };
-        public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order)]; totalPage: Nat; total: Nat}{
-            return TA.getTM<Order>(orders, index, firstIndex, _page, _size);
+        public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order<T>)]; totalPage: Nat; total: Nat}{
+            return TA.getTM<Order<T>>(orders, index, firstIndex, _page, _size);
         };
-        public func getAliveOrders() : [(Toid, ?Order)]{
-            return Array.map<(Toid, Time.Time), (Toid, ?Order)>(List.toArray(aliveOrders), 
-                func (item:(Toid, Time.Time)):(Toid, ?Order) { 
+        public func getAliveOrders() : [(Toid, ?Order<T>)]{
+            return Array.map<(Toid, Time.Time), (Toid, ?Order<T>)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)):(Toid, ?Order<T>) { 
                     return (item.0, orders.get(item.0));
                 });
         };
-        public func getBlockingOrders() : [(Toid, Order)]{
-            return Array.mapFilter<(Toid, Time.Time), (Toid, Order)>(List.toArray(aliveOrders), 
-                func (item:(Toid, Time.Time)): ?(Toid, Order) { 
+        public func getBlockingOrders() : [(Toid, Order<T>)]{
+            return Array.mapFilter<(Toid, Time.Time), (Toid, Order<T>)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)): ?(Toid, Order<T>) { 
                     switch(orders.get(item.0)){
                         case(?order){
                             if (order.status == #Blocking){
@@ -1031,8 +1038,8 @@ module {
                     };
                 });
         };
-        public func getTaskEvents(_toid: Toid) : [TaskEvent]{
-            var events: [TaskEvent] = [];
+        public func getTaskEvents(_toid: Toid) : [TaskEvent<T>]{
+            var events: [TaskEvent<T>] = [];
             for (tid in Option.get(taskEvents.get(_toid), []).vals()){
                 let event_ =  actuator().getTaskEvent(tid);
                 switch(event_){
@@ -1048,7 +1055,7 @@ module {
         // public func getAllEvents(_page: Nat, _size: Nat) : {data: [(Tid, TaskEvent)]; totalPage: Nat; total: Nat}{ 
         //     return actuator().getTaskEvents(_page, _size);
         // };
-        public func getActuator() : TA.TA{
+        public func getActuator() : TA.TA<T>{
             return actuator();
         };
         
@@ -1064,13 +1071,13 @@ module {
         
         // The following methods are used for governance or manual compensation.
         /// update: Used to modify a task when blocking.
-        public func update(_toid: Toid, _ttid: Ttid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
+        public func update(_toid: Toid, _ttid: Ttid, _task: PushTaskRequest<T>, _comp: ?PushCompRequest<T>, _callback: ?TaskCallback<T>) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             assert(not(actuator().isCompleted(_ttid)));
-            let task: TA.Task = _taskFromRequest(_toid, _task, false);
+            let task: TA.Task<T> = _taskFromRequest(_toid, _task, false);
             let tid = actuator().update(_ttid, task);
             let comp = _compFromRequest(_toid, ?tid, _comp);
-            let sagaTask: SagaTask = {
+            let sagaTask: SagaTask<T> = {
                 ttid = tid;
                 task = task;
                 comp = comp;
@@ -1094,7 +1101,7 @@ module {
             return tid_;
         };
         /// append: Used to add a new task to an executing transaction order.
-        public func append(_toid: Toid, _task: PushTaskRequest, _comp: ?PushCompRequest, _callback: ?Callback) : Ttid{
+        public func append(_toid: Toid, _task: PushTaskRequest<T>, _comp: ?PushCompRequest<T>, _callback: ?TaskCallback<T>) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             let ttid = __push(_toid, _task, _comp, false);
             switch(_callback){
@@ -1103,7 +1110,7 @@ module {
             };
             return ttid;
         };
-        public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: PushCompRequest, _callback: ?Callback) : Tcid{
+        public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: PushCompRequest<T>, _callback: ?TaskCallback<T>) : Tcid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             let comp = _taskFromRequest(_toid, _comp, false);
             let tcid = _pushComp(_toid, _forTtid, comp, ?comp.preTtid);
@@ -1198,7 +1205,7 @@ module {
         };
 
         // The following methods are used for data backup and reset.
-        public func getData() : Data {
+        public func getData() : Data<T> {
             return {
                 autoClearTimeout = autoClearTimeout; 
                 index = index; 
@@ -1211,12 +1218,12 @@ module {
                 actuator = actuator().getData(); 
             };
         };
-        public func getDataBase() : Data {
-            let _orders = Iter.toArray(Iter.filter(orders.entries(), func (x: (Toid, Order)): Bool{
+        public func getDataBase() : Data<T> {
+            let _orders = Iter.toArray(Iter.filter(orders.entries(), func (x: (Toid, Order<T>)): Bool{
                 x.1.time + 72*3600*1000000000 > Time.now() or List.some(aliveOrders, func (t: (Toid, Time.Time)): Bool{ x.0 == t.0 })
             }));
             let _taskEvents = Iter.toArray(Iter.filter(taskEvents.entries(), func (x: (Toid, [Ttid])): Bool{
-                Option.isSome(Array.find(_orders, func (t: (Toid, Order)): Bool{ x.0 == t.0 }))
+                Option.isSome(Array.find(_orders, func (t: (Toid, Order<T>)): Bool{ x.0 == t.0 }))
             }));
             return {
                 autoClearTimeout = autoClearTimeout; 
@@ -1228,7 +1235,7 @@ module {
                 actuator = actuator().getDataBase(); 
             };
         };
-        public func setData(_data: Data) : (){
+        public func setData(_data: Data<T>) : (){
             autoClearTimeout := _data.autoClearTimeout;
             index := _data.index; 
             firstIndex := _data.firstIndex; 

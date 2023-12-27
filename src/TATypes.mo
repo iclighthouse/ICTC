@@ -1,11 +1,10 @@
 import CallType "./CallType";
 import Time "mo:base/Time";
 module {
-    public type Domain = CallType.Domain;
     public type Status = CallType.Status;
-    public type CallType = CallType.CallType;
+    public type CallType<T> = CallType.CallType<T>;
     public type Receipt = CallType.Receipt;
-    public type LocalCall = CallType.LocalCall;
+    public type CustomCall<T> = CallType.CustomCall<T>;
     public type TaskResult = CallType.TaskResult;
     public type Callee = Principal;
     public type CalleeStatus = {
@@ -16,9 +15,9 @@ module {
     public type Ttid = Nat; // from 1
     public type Toid = Nat; // from 1
     public type Attempts = Nat;
-    public type Task = {
+    public type Task<T> = {
         callee: Callee;
-        callType: CallType;
+        callType: CallType<T>;
         preTtid: [Ttid];
         toid: ?Toid;
         forTtid: ?Ttid;
@@ -28,12 +27,12 @@ module {
         data: ?Blob;
         time: Time.Time;
     };
-    public type AgentCallback = (_ttid: Ttid, _task: Task, _result: TaskResult) -> async* ();
-    public type Callback = (_toName: Text, _ttid: Ttid, _task: Task, _result: TaskResult) -> async ();
-    public type TaskEvent = {
+    public type AgentCallback<T> = (_ttid: Ttid, _task: Task<T>, _result: TaskResult) -> async* ();
+    public type TaskCallback<T> = (_toName: Text, _ttid: Ttid, _task: Task<T>, _result: TaskResult) -> async ();
+    public type TaskEvent<T> = {
         toid: ?Toid;
         ttid: Ttid;
-        task: Task;
+        task: Task<T>;
         attempts: Attempts;
         result: TaskResult;  // (Status, ?Receipt, ?Err)
         callbackStatus: ?Status;
