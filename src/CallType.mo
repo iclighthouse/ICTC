@@ -1,5 +1,5 @@
 /**
- * Module     : CallType.mo v3.0sss
+ * Module     : CallType.mo v3.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: Wrapping the methods used by the transaction. 
