@@ -464,6 +464,7 @@ module {
                                 result := (#Error, null, ?{code = Error.code(e); message = Error.message(e); });
                                 countAsyncMessage -= Nat.min(2, countAsyncMessage); 
                             };
+                            lastActuationTime := Time.now();
                             var callbackStatus: ?Status = null;
                             var status: Status = result.0;
                             var errorMsg: ?CallType.Err = result.2;
@@ -479,6 +480,7 @@ module {
                                             status := #Error;
                                             errorMsg := ?{code = Error.code(e); message = Error.message(e); };
                                         };
+                                        lastActuationTime := Time.now();
                                     };
                                     case(_){
                                         switch(taskCallback){
@@ -494,6 +496,7 @@ module {
                                                     errorMsg := ?{code = Error.code(e); message = Error.message(e); };
                                                     countAsyncMessage -= Nat.min(2, countAsyncMessage);
                                                 };
+                                                lastActuationTime := Time.now();
                                             };
                                             case(_){};
                                         };

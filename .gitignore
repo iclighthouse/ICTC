@@ -1,0 +1,17 @@
+.DS_Store
+dist-ssr
+*.local
+.dfx
+.vessel
+.config
+.tmp
+
+# Various IDEs and Editors
+.vscode/
+.idea/
+.history/
+**/*~
+
+# frontend code
+node_modules/
+dist/

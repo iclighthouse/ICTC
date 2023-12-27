@@ -1288,16 +1288,27 @@ module {
             return false;
         };
         public func doneEmpty(_toid: Toid) : Bool{
-            switch(orders.get(_toid)){
-                case(?(order)){
+            if (_toid == 0){
+                for ((toid, order) in orders.entries()){
                     if (List.size(order.tasks) == 0 and List.size(order.comps) == 0 and List.size(order.commits) == 0){
                         _setStatus(_toid, #Done);
-                        return true;
-                    }else{
-                        return false;
+                        aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != toid });
                     };
                 };
-                case(_){ return false; };
+                return true;
+            }else{
+                switch(orders.get(_toid)){
+                    case(?(order)){
+                        if (List.size(order.tasks) == 0 and List.size(order.comps) == 0 and List.size(order.commits) == 0){
+                            _setStatus(_toid, #Done);
+                            aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != _toid });
+                            return true;
+                        }else{
+                            return false;
+                        };
+                    };
+                    case(_){ return false; };
+                };
             };
         };
         public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async* Bool{
