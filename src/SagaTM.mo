@@ -87,7 +87,7 @@ module {
     };
 
     public class SagaTM(this: Principal, localCall: ?LocalCall, /*localCallAsync: ?LocalCallAsync,*/ defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
-        let limitAtOnce: Nat = 200;
+        let limitAtOnce: Nat = 500;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
