@@ -20,7 +20,7 @@ import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import TrieMap "mo:base/TrieMap";
 import TATypes "TATypes";
-import TaskHash "TaskHash";
+// import TaskHash "TaskHash";
 import Nat64 "mo:base/Nat64";
 import Binary "mo:icl/Binary";
 import ICRC1 "mo:icl/ICRC1";
@@ -28,7 +28,7 @@ import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 module {
-    public let Version: Nat = 8;
+    public let Version: Nat = 9;
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
@@ -537,6 +537,9 @@ module {
         };
         public func getTaskPool() : [(Ttid, Task)]{
             return _toArray();
+        };
+        public func getSize() : Nat{
+            return _size();
         };
         public func actuations() : {actuationThreads: Nat; lastActuationTime: Time.Time; countAsyncMessage: Nat}{
             return {actuationThreads = actuationThreads; lastActuationTime = lastActuationTime; countAsyncMessage = countAsyncMessage };

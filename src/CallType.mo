@@ -27,7 +27,7 @@ import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
 module {
-    public let Version: Nat = 8;
+    public let Version: Nat = 9;
     public let ICCanister: Text = "aaaaa-aa";
     public let LedgerCanister: Text = "ryjl3-tyaaa-aaaaa-aaaba-cai";
     public let CFCanister: Text = "6nmrm-laaaa-aaaak-aacfq-cai";
