@@ -423,7 +423,7 @@ module {
             var receipt: ?Receipt = null;
             var ttids: [Ttid] = Option.get(_ttids, []);
             actuationThreads += 1;
-            while (count < (if (ttids.size() == 0){ limitNum }else{ size * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
+            while (count < (if (ttids.size() == 0){ limitNum }else{ limitNum * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
                 lastActuationTime := Time.now();
                 switch(Deque.popFront(tasks)){
                     case(?((ttid, task_), deque)){
@@ -477,7 +477,7 @@ module {
                                     case(_){
                                         switch(taskCallback){
                                             case(?(_taskCallback)){
-                                                try{ // Unable to catch error. If an error occurs, the status of this task is #Doing, and does not exist in the TaskPool
+                                                try{ 
                                                     countAsyncMessage += 2;
                                                     await _taskCallback("", ttid, task, result);
                                                     callbackStatus := ?#Done;
