@@ -530,6 +530,9 @@ module {
         public func getTaskPool() : [(Ttid, Task<T>)]{
             return _toArray();
         };
+        public func getSize() : Nat{
+            return _size();
+        };
         public func actuations() : {actuationThreads: Nat; lastActuationTime: Time.Time; countAsyncMessage: Nat}{
             return {actuationThreads = actuationThreads; lastActuationTime = lastActuationTime; countAsyncMessage = countAsyncMessage };
         };
