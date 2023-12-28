@@ -1144,7 +1144,7 @@ module {
             if (_toid == 0){
                 for ((toid, order) in orders.entries()){
                     if (List.size(order.tasks) == 0 and List.size(order.comps) == 0){
-                        _setStatus(_toid, #Done);
+                        _setStatus(toid, #Done);
                         aliveOrders := List.filter(aliveOrders, func (item:(Toid, Time.Time)): Bool{ item.0 != toid });
                     };
                 };
