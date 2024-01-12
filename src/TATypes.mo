@@ -1,6 +1,7 @@
 import CallType "./CallType";
 import Time "mo:base/Time";
 module {
+    public let Version: Text = "2.3.0";
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;

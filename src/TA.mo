@@ -28,7 +28,7 @@ import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 module {
-    public let Version: Nat = 9;
+    public let Version: Text = "2.3.0";
     public type Domain = CallType.Domain;
     public type Status = CallType.Status;
     public type CallType = CallType.CallType;
@@ -307,31 +307,28 @@ module {
                 return ();
             };
             var completed: Bool = false;
-            var moveFirstPointer: Bool = true;
-            var i: Nat = firstIndex;
-            while (i < index and not(completed)){
-                switch(taskLogs.get(i)){
+            var count: Nat = 0;
+            while (firstIndex < index and count < 5000 and not(completed)){
+                count += 1;
+                switch(taskLogs.get(firstIndex)){
                     case(?(taskLog)){
-                        if (Time.now() > taskLog.time + clearTimeout and taskLog.result.0 != #Todo and taskLog.result.0 != #Doing){
-                            taskLogs.delete(i);
-                            i += 1;
-                        }else if (Time.now() > taskLog.time + clearTimeout){
-                            i += 1;
-                            moveFirstPointer := false;
+                        if (Time.now() > taskLog.time + clearTimeout){
+                            taskLogs.delete(firstIndex);
+                            firstIndex += 1;
                         }else{
-                            moveFirstPointer := false;
                             completed := true;
                         };
                     };
                     case(_){
-                        i += 1;
+                        firstIndex += 1;
                     };
                 };
-                if (moveFirstPointer) { firstIndex += 1; };
             };
             if (_clearErr){
                 completed := false;
-                while (firstErrIndex < errIndex and not(completed)){
+                count := 0;
+                while (firstErrIndex < errIndex and count < 500 and not(completed)){
+                    count += 1;
                     switch(errorLogs.get(firstErrIndex)){
                         case(?(taskLog)){
                             if (Time.now() > taskLog.time + clearTimeout){
@@ -425,7 +422,7 @@ module {
             var receipt: ?CallType.Receipt = null;
             var ttids: [Ttid] = Option.get(_ttids, []);
             actuationThreads += 1;
-            while (count < (if (ttids.size() == 0){ limitNum }else{ limitNum * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
+            while (count < (if (ttids.size() == 0){ limitNum }else{ limitNum * 5 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
                 lastActuationTime := Time.now();
                 switch(Deque.popFront(tasks)){
                     case(?((ttid, task_), deque)){
@@ -515,12 +512,14 @@ module {
                         if (toRedo){
                             _push(ttid, task);
                         };
-                        //autoClear
-                        _clear(null, false);
-                        count += 1;
                     };
                     case(_){};
                 };
+                count += 1;
+            };
+            //autoClear
+            if (count < 20){
+                _clear(null, false);
             };
             actuationThreads := 0;
             return callCount;

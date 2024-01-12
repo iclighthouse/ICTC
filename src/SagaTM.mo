@@ -20,7 +20,7 @@ import TA "./TA";
 import Error "mo:base/Error";
 
 module {
-    public let Version: Nat = 9;
+    public let Version: Text = "2.3.0";
     public type Toid = Nat;
     public type Ttid = TA.Ttid;
     public type Tcid = TA.Ttid;
