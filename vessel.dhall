@@ -1,4 +1,4 @@
 {
-  dependencies = [ "base", "sha224", "icl" ],
+  dependencies = [ "base", "icl" ],
   compiler = None Text
 }

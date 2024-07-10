@@ -8,13 +8,11 @@
 
 import Nat "mo:base/Nat";
 import Array "mo:base/Array";
-import Hash "mo:base/Hash";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Iter "mo:base/Iter";
 import List "mo:base/List";
-import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
 import TA "./TA";
 import Error "mo:base/Error";
@@ -104,8 +102,8 @@ module {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
                 case(_){
-                    let call_ = Option.get(call, func (callee: Principal, cycles: Nat, ct: CallType<T>, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
-                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, this, call_, ?_taskCallbackProxy, null);
+                    let call_ = Option.get(call, func (_callee: Principal, _cycles: Nat, _ct: CallType<T>, _r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
+                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, call_, ?_taskCallbackProxy, null);
                     actuator_ := ?act;
                     return act;
                 };
@@ -204,10 +202,7 @@ module {
                     _setStatus(toid, #Blocking);
                 };
             } else { // Blocking
-                // if (_result.0 == #Done and isClosed and Option.get(_orderLastTid(toid), 0) == _ttid){ //
-                //     await _orderComplete(toid, #Done);
-                //     _removeTATaskByOid(toid);
-                // }
+                //
             };
             //taskEvents
             switch(taskEvents.get(toid)){
@@ -330,14 +325,6 @@ module {
                 case(_){ return null; };
             };
         };
-        // private func _inOrderTasks(_toid: Toid, _ttid: Ttid) : Bool{
-        //     switch(orders.get(_toid)){
-        //         case(?(order)){
-        //             return Option.isSome(List.find(order.tasks, func (t:SagaTask): Bool{ t.ttid == _ttid }));
-        //         };
-        //         case(_){ return false; };
-        //     };
-        // };
         private func _putTask(_toid: Toid, _sagaTask: SagaTask<T>) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -567,14 +554,6 @@ module {
                 case(_){};
             };
         };
-        // private func _getTask(_toid: Toid, _ttid: Ttid) : ?SagaTask<T>{
-        //     switch(orders.get(_toid)){
-        //         case(?(order)){
-        //             return List.find(order.tasks, func (t:SagaTask<T>): Bool{ t.ttid == _ttid });
-        //         };
-        //         case(_){ return null; };
-        //     };
-        // };
         private func _isTasksDone(_toid: Toid) : Bool{
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -588,14 +567,6 @@ module {
                 case(_){ return false; };
             };
         };
-        // private func _getComp(_toid: Toid, _tcid: Tcid) : ?CompTask{
-        //     switch(orders.get(_toid)){
-        //         case(?(order)){
-        //             return List.find(order.comps, func (t:CompTask): Bool{ t.tcid == _tcid });
-        //         };
-        //         case(_){ return null; };
-        //     };
-        // };
         private func _isCompsDone(_toid: Toid) : Bool{
             switch(orders.get(_toid)){
                 case(?(order)){
@@ -662,14 +633,6 @@ module {
                 case(_){ return null; };
             };
         };
-        // private func _inOrderComps(_toid: Toid, _tcid: Tcid) : Bool{
-        //     switch(orders.get(_toid)){
-        //         case(?(order)){
-        //             return Option.isSome(List.find(order.comps, func (t:CompTask): Bool{ t.tcid == _tcid }));
-        //         };
-        //         case(_){ return false; };
-        //     };
-        // };
         private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Compensation<T>, _preTtid: ?[Ttid]) : Tcid{
             if (not(_inOrders(_toid))){ return 0; };
             let preTtid = Option.get(_orderLastCid(_toid), 0);
@@ -724,7 +687,7 @@ module {
                                 if (task.ttid < _errTask){
                                     switch(task.comp){
                                         case(?(comp)){
-                                            let cid = _pushComp(_toid, task.ttid, comp, null);
+                                            ignore _pushComp(_toid, task.ttid, comp, null);
                                         };
                                         case(_){ // to block
                                             let comp: Compensation<T> = {
@@ -739,7 +702,7 @@ module {
                                                 data = null;
                                                 time = Time.now();
                                             };
-                                            let cid = _pushComp(_toid, task.ttid, comp, null);
+                                            ignore _pushComp(_toid, task.ttid, comp, null);
                                         };
                                     };
                                 };
@@ -752,38 +715,6 @@ module {
                 case(_){};
             };
         };
-        // private func _setComp(_toid: Toid, _ttid: Ttid, _comp: ?Compensation<T>) : Bool{
-        //     var res : Bool = false;
-        //     switch(orders.get(_toid)){
-        //         case(?(order)){
-        //             var tasks = order.tasks;
-        //             tasks := List.map(tasks, func (t:SagaTask<T>): SagaTask<T>{
-        //                 if (t.ttid == _ttid and Option.isNull(t.comp)){
-        //                     res := true;
-        //                     return {
-        //                         ttid = t.ttid;
-        //                         task = t.task;
-        //                         comp = _comp;
-        //                         status = t.status;
-        //                     };
-        //                 } else { return t; };
-        //             });
-        //             let orderNew : Order = {
-        //                 compStrategy = order.compStrategy;
-        //                 tasks = tasks;
-        //                 allowPushing = order.allowPushing;
-        //                 comps = order.comps;
-        //                 status = order.status;
-        //                 callbackStatus = order.callbackStatus;
-        //                 time = order.time;
-        //                 data = order.data;
-        //             };
-        //             orders.put(_toid, orderNew);
-        //         };
-        //         case(_){};
-        //     };
-        //     return res;
-        // };
         private func _setTaskStatus(_toid: Toid, _ttid: Ttid, _status: Status) : Bool{
             var res : Bool = false;
             switch(orders.get(_toid)){
@@ -931,11 +862,6 @@ module {
             };
             return null;
         };
-        // public func setCompForLastTask(_toid: Toid, _ttid: Ttid, _comp: ?PushCompRequest) : Bool{
-        //     assert(_isOpening(_toid) and Option.get(_orderLastTid(_toid), 0) == _ttid);
-        //     let comp = _compFromRequest(_toid, ?_ttid, _comp);
-        //     return _setComp(_toid, _ttid, comp);
-        // };
         public func open(_toid: Toid) : (){
             _allowPushing(_toid, #Opening);
         };
@@ -952,15 +878,6 @@ module {
         //         case(_){ true };
         //     };
         // };
-        // public func doing(_toid: Toid) : (){
-        //     switch(_status(_toid)){
-        //         case(?(#Todo)){ _setStatus(_toid, #Doing); };
-        //         case(_){};
-        //     };
-        //     if (_status(_toid) == #Doing and not(_isOpening(_toid) and _isTasksDone(_toid))){
-        //         _setStatus(_toid, #Done);
-        //     };
-        // };
         public func run(_toid: Toid) : async ?OrderStatus{ 
             switch(_status(_toid)){
                 case(?(#Todo)){ _setStatus(_toid, #Doing); };
@@ -969,7 +886,7 @@ module {
             let actuations = actuator().actuations();
             if (actuations.actuationThreads < 5 or Time.now() > actuations.lastActuationTime + 60*1000000000){ // 60s
                 try{ 
-                    let count = await* actuator().run(); 
+                    ignore await* actuator().run(); 
                 }catch(e){};
             };
             if (_toid > 0){
@@ -988,7 +905,7 @@ module {
             if (actuations.actuationThreads > 10){
                 throw Error.reject("ICTC execution threads exceeded the limit.");
             };
-            let count = await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
+            ignore await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
             if (_toid > 0){
                 try{ await* _statusTest(_toid); }catch(e){};
             };
@@ -1213,8 +1130,6 @@ module {
                 orders = Iter.toArray(orders.entries());
                 aliveOrders = aliveOrders; 
                 taskEvents = Iter.toArray(taskEvents.entries());
-                //taskCallback = Iter.toArray(taskCallback.entries());
-                //orderCallback = Iter.toArray(orderCallback.entries());
                 actuator = actuator().getData(); 
             };
         };
@@ -1242,8 +1157,6 @@ module {
             orders := TrieMap.fromEntries(_data.orders.vals(), Nat.equal, TA.natHash);
             aliveOrders := _data.aliveOrders;
             taskEvents := TrieMap.fromEntries(_data.taskEvents.vals(), Nat.equal, TA.natHash);
-            //taskCallback := TrieMap.fromEntries(_data.taskCallback.vals(), Nat.equal, Hash.hash);
-            //orderCallback := TrieMap.fromEntries(_data.orderCallback.vals(), Nat.equal, Hash.hash);
             actuator().setData(_data.actuator);
         };
         

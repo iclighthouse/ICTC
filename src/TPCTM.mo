@@ -8,13 +8,11 @@
 
 import Nat "mo:base/Nat";
 import Array "mo:base/Array";
-import Hash "mo:base/Hash";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Iter "mo:base/Iter";
 import List "mo:base/List";
-import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
 import Error "mo:base/Error";
 import TA "./TA";
@@ -107,8 +105,8 @@ module {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
                 case(_){
-                    let call_ = Option.get(customCall, func (callee: Principal, cycles: Nat, ct: CallType<T>, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
-                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, this, call_, ?_taskCallbackProxy, null);
+                    let call_ = Option.get(customCall, func (_callee: Principal, _cycles: Nat, _ct: CallType<T>, _r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
+                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, call_, ?_taskCallbackProxy, null);
                     actuator_ := ?act;
                     return act;
                 };
@@ -890,7 +888,7 @@ module {
                                 if (task.status == #Done){
                                     switch(task.comp){
                                         case(?(comp)){
-                                            let cid = _pushComp(_toid, task.ttid, comp, null);
+                                            ignore _pushComp(_toid, task.ttid, comp, null);
                                         };
                                         case(_){ // ignore
                                         };
@@ -1099,7 +1097,7 @@ module {
             let actuations = actuator().actuations();
             if (actuations.actuationThreads == 0 or Time.now() > actuations.lastActuationTime + 60*1000000000){ // 60s
                 try{ 
-                    let count = await* actuator().run(); 
+                    ignore await* actuator().run(); 
                 }catch(e){};
             };
             if (_toid > 0){
@@ -1118,7 +1116,7 @@ module {
             if (actuations.actuationThreads > 10){
                 throw Error.reject("ICTC execution threads exceeded the limit.");
             };
-            let count = await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
+            ignore await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
             if (_toid > 0){
                 try{ await* _statusTest(_toid); }catch(e){};
             };

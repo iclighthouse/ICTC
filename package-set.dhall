@@ -1,10 +1,10 @@
--- let upstream = https://github.com/dfinity/vessel-package-set/releases/download/mo-0.10.0-20230911/package-set.dhall sha256:7bce6afe8b96a8808f66b5b6f7015257d44fc1f3e95add7ced3ccb7ce36e5603
--- mo-0.9.7-20230718
+-- let upstream = https://github.com/dfinity/vessel-package-set/releases/download/mo-0.11.1-20240411/package-set.dhall
+-- mo-0.11.1-20240411
 let upstream = 
 [ { dependencies = [] : List Text
   , name = "base"
   , repo = "https://github.com/dfinity/motoko-base.git"
-  , version = "1bee37dbe5dbab1017b18ba0490b78f148196c8b"
+  , version = "6f49e5f877742b79e97ef1b6f226a7f905ba795c"
   }
 , { dependencies = [ "base" ]
   , name = "crud"
@@ -132,7 +132,7 @@ let
     , { dependencies = [ "base", "sha224" ]
       , name = "icl"
       , repo = "https://github.com/iclighthouse/icl-vessel"
-      , version = "35725bcede1f9ee47f63dccffeba51dd6d440ecd"
+      , version = "e335202c6cbd56c1f570314d8396152003ace77e"
       }
     ] : List Package
 

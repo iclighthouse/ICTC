@@ -8,65 +8,60 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Nat "mo:base/Nat";
-import Iter "mo:base/Iter";
+import Nat64 "mo:base/Nat64";
 import Time "mo:base/Time";
 import Option "mo:base/Option";
 import Error "mo:base/Error";
-import CallType "../src/CallType";
 import Principal "mo:base/Principal";
+import Binary "mo:icl/Binary";
+import CallType "../src/CallType";
 import TA "../src/TA";
 import TPCTM "../src/TPCTM";
 
 shared(installMsg) actor class Example() = this {
-    type CallType = CallType.CallType;
+    public type CustomCallType = { 
+        #This: {
+            #foo : (Nat);
+        };
+    };
+    type CallType = CallType.CallType<CustomCallType>;
+    type Task = TPCTM.Task<CustomCallType>;
     type TaskResult = CallType.TaskResult;
     private var tokenA_canister = Principal.fromText("ueghb-uqaaa-aaaak-aaioa-cai");
     private var tokenB_canister = Principal.fromText("udhbv-ziaaa-aaaak-aaioq-cai");
     private var x : Nat = 0;
-    private func foo(count: Nat) : (){
-        x += 100;
+    private func foo(_count: Nat) : Nat{
+        x += _count;
+        return x;
     };
-    private func _local(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : async (TPCTM.TaskResult){
+    private func _localCall(_callee: Principal, _cycles: Nat, _args: CallType, _receipt: ?TPCTM.Receipt) : async (TaskResult){
         switch(_args){
-            case(#This(method)){
+            case(#custom(#This(method))){
                 switch(method){
                     case(#foo(count)){
                         var result = foo(count); // Receipt
-                        return (#Done, ?#This(#foo(result)), null);
+                        return (#Done, ?#result(?(Binary.BigEndian.fromNat64(Nat64.fromNat(result)), debug_show(result))), null);
                     };
                 };
             };
             case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
         };
     };
-    // private func _localAsync(_args: TPCTM.CallType, _receipt: ?TPCTM.Receipt) : async (TPCTM.TaskResult){
-    //     switch(_args){
-    //         case(#This(method)){
-    //             switch(method){
-    //                 case(#foo(count)){
-    //                     var result = foo(count); // Receipt
-    //                     return (#Done, ?#This(#foo(result)), null);
-    //                 };
-    //             };
-    //         };
-    //         case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
-    //     };
-    // };
-    private func _taskCallback(_name: Text, _tid: TPCTM.Ttid, _task: TPCTM.Task, _result: TPCTM.TaskResult) : async (){
+    private func _taskCallback(_name: Text, _tid: TPCTM.Ttid, _task: Task, _result: TaskResult) : async (){
         taskLogs := TA.arrayAppend(taskLogs, [(_tid, _task, _result)]);
     };
     private func _orderCallback(_name: Text, _oid: TPCTM.Toid, _status: TPCTM.OrderStatus, _data: ?Blob) : async (){
         orderLogs := TA.arrayAppend(orderLogs, [(_oid, _status)]);
     };
 
-    private stable var taskLogs: [(TPCTM.Ttid, TPCTM.Task, TaskResult)] = [];
+    private stable var taskLogs: [(TPCTM.Ttid, Task, TaskResult)] = [];
     private stable var orderLogs: [(TPCTM.Toid, TPCTM.OrderStatus)] = [];
-    private var tpc: ?TPCTM.TPCTM = null;
-    private func _getTPC() : TPCTM.TPCTM {
+    private var tpc: ?TPCTM.TPCTM<CustomCallType> = null;
+    private func _getTPC() : TPCTM.TPCTM<CustomCallType> {
         switch(tpc){
             case(?(_tpc)){ return _tpc };
             case(_){
-                let _tpc = TPCTM.TPCTM(Principal.fromActor(this), ?_local, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
+                let _tpc = TPCTM.TPCTM<CustomCallType>(Principal.fromActor(this), ?_localCall, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
                 tpc := ?_tpc;
                 return _tpc;
             };
@@ -76,7 +71,7 @@ shared(installMsg) actor class Example() = this {
     public query func getX() : async Nat{
         x;
     };
-    public query func getTaskLogs() : async [(TPCTM.Ttid, TPCTM.Task, TaskResult)]{
+    public query func getTaskLogs() : async [(TPCTM.Ttid, Task, TaskResult)]{
         return taskLogs;
     };
     public query func getOrderLogs() : async [(TPCTM.Toid, TPCTM.OrderStatus)]{
@@ -86,36 +81,17 @@ shared(installMsg) actor class Example() = this {
         taskLogs := [];
         orderLogs := [];
     };
-    public shared func balanceOf(_account: Text) : async (balanceA: Nat, balanceB: Nat){
-        let resA = await* CallType.call(#DRC20(#balanceOf(_account)), #Canister(tokenA_canister, 0), null);
-        let resB = await* CallType.call(#DRC20(#balanceOf(_account)), #Canister(tokenB_canister, 0), null);
-        var balanceA: Nat = 0;
-        if (resA.0 == #Done){
-            switch(resA.1){
-                case(?(#DRC20(#balanceOf(value)))){ balanceA := value; };
-                case(_){};
-            };
-        };
-        var balanceB: Nat = 0;
-        if (resB.0 == #Done){
-            switch(resB.1){
-                case(?(#DRC20(#balanceOf(value)))){ balanceB := value; };
-                case(_){};
-            };
-        };
-        return (balanceA, balanceB);
-    };
     public shared func claimTestTokens(_account: Text) : async (){
-        let act = TA.TA(50, 24*3600*1000000000, Principal.fromActor(this), _local, null, ?_taskCallback);
-        var task = _task(tokenA_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)));
-        let tid1 = act.push(task);
-        task := _task(tokenB_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)));
-        let tid2 = act.push(task);
-        let f = act.run();
+        let act = TA.TA<CustomCallType>(50, 24*3600*1000000000, _localCall, null, ?_taskCallback);
+        var task = _task(tokenA_canister, #DRC20(#drc20_transfer(_account, 5000000000, null, null, null)));
+        let _tid1 = act.push(task);
+        task := _task(tokenB_canister, #DRC20(#drc20_transfer(_account, 5000000000, null, null, null)));
+        let _tid2 = act.push(task);
+        let _f = act.run();
     };
 
     
-    private func _buildTask(_businessId: ?Blob, _callee: Principal, _callType: TPCTM.CallType, _preTtids: [TPCTM.Ttid]) : TPCTM.TaskRequest{
+    private func _buildTask(_businessId: ?Blob, _callee: Principal, _callType: CallType, _preTtids: [TPCTM.Ttid]) : TPCTM.TaskRequest<CustomCallType>{
         return {
             callee = _callee;
             callType = _callType;
@@ -126,7 +102,7 @@ shared(installMsg) actor class Example() = this {
             data = _businessId;
         };
     };
-    private func _task(_callee: Principal, _callType: TPCTM.CallType) : TPCTM.Task{
+    private func _task(_callee: Principal, _callType: CallType) : Task{
         return {
             callee = _callee;
             callType = _callType;
@@ -144,10 +120,8 @@ shared(installMsg) actor class Example() = this {
     public shared(msg) func swap1(_to: Text): async (TPCTM.Toid, ?TPCTM.OrderStatus){
         let valueA: Nat = 100000000;
         let valueB: Nat = 200000000;
-        let tokenFee: Nat = 100000;
         let caller: Text = Principal.toText(msg.caller);
         let to: Text = _to;
-        let contract: Text =  Principal.toText(Principal.fromActor(this));
 
         // Transaction:
         /// prepare
@@ -161,14 +135,14 @@ shared(installMsg) actor class Example() = this {
         // tokenB: executeTransfer $tx2 #fallback
 
         let oid = _getTPC().create("swap1", null, null);
-        var prepare = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
-        var commit = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
-        var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
-        let tid1 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
-        prepare := _buildTask(null, tokenB_canister, #DRC20(#lockTransferFrom(to, caller, valueB, 5*60, null, null, null, null)), []);
-        commit := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
-        comp := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
-        let tid2 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
+        var prepare = _buildTask(null, tokenA_canister, #DRC20(#drc20_lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
+        var commit = _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
+        var comp = _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
+        let _tid1 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
+        prepare := _buildTask(null, tokenB_canister, #DRC20(#drc20_lockTransferFrom(to, caller, valueB, 5*60, null, null, null, null)), []);
+        commit := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
+        comp := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
+        let _tid2 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
         _getTPC().close(oid);
         let res = await _getTPC().run(oid);
         return (oid, res);
@@ -177,10 +151,8 @@ shared(installMsg) actor class Example() = this {
     public shared(msg) func swap2(_to: Text): async (TPCTM.Toid, ?TPCTM.OrderStatus){ // Blocking
         let valueA: Nat = 100000000;
         let valueB: Nat = 200000000;
-        let tokenFee: Nat = 100000;
         let caller: Text = Principal.toText(msg.caller);
         let to: Text = _to;
-        let contract: Text =  Principal.toText(Principal.fromActor(this));
 
         // Transaction:
         /// prepare
@@ -194,14 +166,14 @@ shared(installMsg) actor class Example() = this {
         // tokenB: executeTransfer $tx2 #fallback
 
         let oid = _getTPC().create("swap2", null, null);
-        var prepare = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
-        var commit = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
-        var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
-        let tid1 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
-        prepare := _buildTask(null, tokenB_canister, #DRC20(#lockTransferFrom(to, caller, valueB, 5*60, null, null, null, null)), []);
-        commit := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#ManualFill(Blob.fromArray([])), #sendAll, null, null, null, null)), []);
-        comp := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#ManualFill(Blob.fromArray([])), #fallback, null, null, null, null)), []);
-        let tid2 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
+        var prepare = _buildTask(null, tokenA_canister, #DRC20(#drc20_lockTransferFrom(caller, to, valueA, 5*60, null, null, null, null)), []);
+        var commit = _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #sendAll, null, null, null, null)), []);
+        var comp = _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
+        let _tid1 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
+        prepare := _buildTask(null, tokenB_canister, #DRC20(#drc20_lockTransferFrom(to, caller, valueB, 5*60, null, null, null, null)), []);
+        commit := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#ManualFill(Blob.fromArray([])), #sendAll, null, null, null, null)), []);
+        comp := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#ManualFill(Blob.fromArray([])), #fallback, null, null, null, null)), []);
+        let _tid2 = _getTPC().push(oid, prepare, commit, ?comp, null, null);
         _getTPC().close(oid);
         let res = await _getTPC().run(oid);
         return (oid, res);
@@ -252,28 +224,28 @@ shared(installMsg) actor class Example() = this {
     public query func ictc_2PC_getTOCount() : async Nat{
         return _getTPC().count();
     };
-    public query func ictc_2PC_getTO(_toid: TPCTM.Toid) : async ?TPCTM.Order{
+    public query func ictc_2PC_getTO(_toid: TPCTM.Toid) : async ?TPCTM.Order<CustomCallType>{
         return _getTPC().getOrder(_toid);
     };
-    public query func ictc_2PC_getTOs(_page: Nat, _size: Nat) : async {data: [(TPCTM.Toid, TPCTM.Order)]; totalPage: Nat; total: Nat}{
+    public query func ictc_2PC_getTOs(_page: Nat, _size: Nat) : async {data: [(TPCTM.Toid, TPCTM.Order<CustomCallType>)]; totalPage: Nat; total: Nat}{
         return _getTPC().getOrders(_page, _size);
     };
-    public query func ictc_2PC_getTOPool() : async [(TPCTM.Toid, ?TPCTM.Order)]{
+    public query func ictc_2PC_getTOPool() : async [(TPCTM.Toid, ?TPCTM.Order<CustomCallType>)]{
         return _getTPC().getAliveOrders();
     };
-    public query func ictc_2PC_getTT(_ttid: TPCTM.Ttid) : async ?TPCTM.TaskEvent{
+    public query func ictc_2PC_getTT(_ttid: TPCTM.Ttid) : async ?TPCTM.TaskEvent<CustomCallType>{
         return _getTPC().getActuator().getTaskEvent(_ttid);
     };
-    public query func ictc_2PC_getTTByTO(_toid: TPCTM.Toid) : async [TPCTM.TaskEvent]{
+    public query func ictc_2PC_getTTByTO(_toid: TPCTM.Toid) : async [TPCTM.TaskEvent<CustomCallType>]{
         return _getTPC().getTaskEvents(_toid);
     };
-    public query func ictc_2PC_getTTs(_page: Nat, _size: Nat) : async {data: [(TPCTM.Ttid, TPCTM.TaskEvent)]; totalPage: Nat; total: Nat}{
+    public query func ictc_2PC_getTTs(_page: Nat, _size: Nat) : async {data: [(TPCTM.Ttid, TPCTM.TaskEvent<CustomCallType>)]; totalPage: Nat; total: Nat}{
         return _getTPC().getActuator().getTaskEvents(_page, _size);
     };
-    public query func ictc_2PC_getTTPool() : async [(TPCTM.Ttid, TPCTM.Task)]{
+    public query func ictc_2PC_getTTPool() : async [(TPCTM.Ttid, Task)]{
         let pool = _getTPC().getActuator().getTaskPool();
-        let arr = Array.map<(TPCTM.Ttid, TPCTM.Task), (TPCTM.Ttid, TPCTM.Task)>(pool, 
-        func (item:(TPCTM.Ttid, TPCTM.Task)): (TPCTM.Ttid, TPCTM.Task){
+        let arr = Array.map<(TPCTM.Ttid, Task), (TPCTM.Ttid, Task)>(pool, 
+        func (item:(TPCTM.Ttid, Task)): (TPCTM.Ttid, Task){
             (item.0, item.1);
         });
         return arr;
@@ -314,9 +286,9 @@ shared(installMsg) actor class Example() = this {
     //     tpc.close(_toid);
     //     return ttid;
     // };
-    public shared(msg) func ictc_2PC_appendTT(_businessId: ?Blob, _toid: TPCTM.Toid, _forTtid: ?TPCTM.Ttid, _callee: Principal, _callType: TPCTM.CallType, _preTtids: [TPCTM.Ttid]) : async TPCTM.Ttid{
+    public shared(msg) func ictc_2PC_appendTT(_businessId: ?Blob, _toid: TPCTM.Toid, _forTtid: ?TPCTM.Ttid, _callee: Principal, _callType: CallType, _preTtids: [TPCTM.Ttid]) : async TPCTM.Ttid{
         // Governance or manual compensation (operation allowed only when a transaction order is in blocking status).
-        // assert(_onlyIctcAdmin(msg.caller));
+        assert(_onlyIctcAdmin(msg.caller));
         assert(_onlyBlocking(_toid)); 
         let tpc = _getTPC();
         tpc.open(_toid);
@@ -332,7 +304,7 @@ shared(installMsg) actor class Example() = this {
         let tpc = _getTPC();
         let ttid = tpc.redo(_toid, _ttid);
         try{
-            let r = await tpc.run(_toid);
+            let _r = await tpc.run(_toid);
         }catch(e){
             throw Error.reject("430: ICTC error: "# Error.message(e)); 
         };
@@ -365,11 +337,11 @@ shared(installMsg) actor class Example() = this {
     };
     public shared(msg) func ictc_2PC_completeTO(_toid: TPCTM.Toid, _status: TPCTM.OrderStatus) : async Bool{
         // After governance or manual compensations, this method needs to be called to complete the transaction order.
-        // assert(_onlyIctcAdmin(msg.caller));
+        assert(_onlyIctcAdmin(msg.caller));
         assert(_onlyBlocking(_toid));
         let tpc = _getTPC();
         tpc.close(_toid);
-        let r = await tpc.run(_toid);
+        let _r = await tpc.run(_toid);
         return await* _getTPC().complete(_toid, _status);
     };
     public shared(msg) func ictc_2PC_runTO(_toid: TPCTM.Toid) : async ?TPCTM.OrderStatus{
@@ -388,7 +360,7 @@ shared(installMsg) actor class Example() = this {
         assert(_onlyIctcAdmin(msg.caller));
         let tpc = _getTPC();
         try{
-            let r = await tpc.run(0);
+            let _r = await tpc.run(0);
         }catch(e){
             throw Error.reject("430: ICTC error: "# Error.message(e)); 
         };
@@ -401,7 +373,7 @@ shared(installMsg) actor class Example() = this {
 
 
     // upgrade
-    private stable var __tpcDataNew: ?TPCTM.Data = null;
+    private stable var __tpcDataNew: ?TPCTM.Data<CustomCallType> = null;
     system func preupgrade() {
         let data = _getTPC().getData();
         __tpcDataNew := ?data;

@@ -11,9 +11,7 @@ import Cycles "mo:base/ExperimentalCycles";
 import DRC20 "mo:icl/DRC20";
 import ICRC1 "mo:icl/ICRC1";
 import ICRC2 "mo:icl/ICRC1";
-import Result "mo:base/Result";
 import Error "mo:base/Error";
-import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 
 module {
@@ -140,7 +138,7 @@ module {
             };
             case(#ICRC1(method)){
                 let token: ICRC1.Self = actor(Principal.toText(_callee));
-                if (_cycles > 0){ Cycles.add(_cycles); };
+                if (_cycles > 0){ Cycles.add<system>(_cycles); };
                 switch(method){
                     case(#icrc1_transfer(args)){
                         var result: { #Ok: Nat; #Err: ICRC1.TransferError; } = #Err(#TemporarilyUnavailable); // Receipt
@@ -161,7 +159,7 @@ module {
             };
             case(#ICRC2(method)){
                 let token: ICRC2.Self = actor(Principal.toText(_callee));
-                if (_cycles > 0){ Cycles.add(_cycles); };
+                if (_cycles > 0){ Cycles.add<system>(_cycles); };
                 switch(method){
                     case(#icrc2_approve(args)){
                         var result: { #Ok: Nat; #Err: ICRC2.ApproveError; } = #Err(#TemporarilyUnavailable); // Receipt
@@ -195,7 +193,7 @@ module {
             };
             case(#DRC20(method)){
                 let token: DRC20.Self = actor(Principal.toText(_callee));
-                if (_cycles > 0){ Cycles.add(_cycles); };
+                if (_cycles > 0){ Cycles.add<system>(_cycles); };
                 switch(method){
                     case(#drc20_approve(spender, amount, nonce, sa, data)){
                         var result: DRC20.TxnResult = #err({code=#UndefinedError; message="No call."}); // Receipt
@@ -307,7 +305,7 @@ module {
                     case(#drc20_dropAccount(_sa)){
                         try{
                             // do
-                            let f = token.drc20_dropAccount(_sa);
+                            let _f = token.drc20_dropAccount(_sa);
                             // check & return
                             return (#Done, ?#DRC20(#drc20_dropAccount), null);
                         } catch (e){
