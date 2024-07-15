@@ -61,7 +61,7 @@ let oid = saga.create("TO_name", #Forward, null, null);
 ```
 let task: SagaTM.PushTaskRequest<CustomCallType> = { // for example
     callee = Principal.fromText("ryjl3-tyaaa-aaaaa-aaaba-cai");
-    callType = #Ledger(#transfer(ledger_transferArgs)); // method to be called
+    callType = #ICRC1(#icrc1_transfer(_transferArgs_)); // method to be called
     preTtid = []; // Pre-dependent tasks
     attemptsMax = ?1; // Maximum number of repeat attempts in case of exception
     recallInterval = ?0; // nanoseconds
@@ -79,7 +79,7 @@ let res = await saga.run(oid);
 
 - Implements the upgrade function for SagaTM.
 ```
-private stable var __sagaData: ?SagaTM.Data = null;
+private stable var __sagaData: ?SagaTM.Data<CustomCallType> = null;
 system func preupgrade() {
     let data = _getSaga().getData();
     __sagaData := ?data;
@@ -141,9 +141,6 @@ private func _localCall(_callee: Principal, _cycles: Nat, _args: TPCTM.CallType<
 };
 ```
 
-- (Optional) Custom CallType.mo file.
-Modify the CallType.mo file according to your local tasks and the external tasks you need to call.
-
 - Creates a tpc object.
 ```
 let tpc = TPCTM.TPCTM<CustomCallType>(Principal.fromActor(this), ?_localCall, ?_taskCallback, ?_orderCallback);
@@ -158,7 +155,7 @@ let oid = tpc.create("TO_name", null, null);
 ```
 let prepare: TPCTM.TaskRequest<CustomCallType> = { // for example
     callee = token_canister;
-    callType = #DRC20(#lockTransferFrom(caller, to, value, 5*60, null, null, null, null)); // method to be called
+    callType = #DRC20(#drc20_lockTransferFrom(caller, to, value, 5*60, null, null, null, null)); // method to be called
     preTtid = []; // Pre-dependent tasks
     attemptsMax = ?1; // Maximum number of repeat attempts in case of exception
     recallInterval = ?0; // nanoseconds
@@ -167,7 +164,7 @@ let prepare: TPCTM.TaskRequest<CustomCallType> = { // for example
 };
 let commit: TPCTM.TaskRequest<CustomCallType> = { // for example
     callee = token_canister;
-    callType = #DRC20(#executeTransfer(#AutoFill, #sendAll, null, null, null, null)); // method to be called
+    callType = #DRC20(#drc20_executeTransfer(#AutoFill, #sendAll, null, null, null, null)); // method to be called
     preTtid = []; // Pre-dependent tasks
     attemptsMax = ?1; // Maximum number of repeat attempts in case of exception
     recallInterval = ?0; // nanoseconds
@@ -185,7 +182,7 @@ let res = await tpc.run(oid);
 
 - Implements the upgrade function for TPCTM.
 ```
-private stable var __tpcData: ?TPCTM.Data = null;
+private stable var __tpcData: ?TPCTM.Data<CustomCallType> = null;
 system func preupgrade() {
     let data = _getTPC().getData();
     __tpcData := ?data;
