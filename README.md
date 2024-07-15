@@ -81,6 +81,8 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 
 ## Reference Docs
 
+Note: Version 3.0 is not compatible with version 2.0 and requires refactoring your code to upgrade.
+
 [ICTC v3.0 Reference](./docs/ictc_reference-3.0.md)
 
 [ICTC v2.0 Reference](./docs/ictc_reference-2.0.md)
