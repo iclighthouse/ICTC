@@ -1,5 +1,5 @@
 /**
- * Module     : TA.mo v2.0
+ * Module     : TA.mo v3.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC Sync Task Actuator.
@@ -20,35 +20,32 @@ import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import TrieMap "mo:base/TrieMap";
 import TATypes "TATypes";
-import TaskHash "TaskHash";
+// import TaskHash "TaskHash";
 import Nat64 "mo:base/Nat64";
 import Binary "mo:icl/Binary";
-import ICRC1 "mo:icl/ICRC1";
 import Error "mo:base/Error";
 // import Call "mo:base/ExperimentalInternetComputer";
 
 module {
-    public let Version: Nat = 8;
-    public type Domain = CallType.Domain;
+    public let Version: Nat = 10;
     public type Status = CallType.Status;
-    public type CallType = CallType.CallType;
+    public type CallType<T> = CallType.CallType<T>;
     public type Receipt = CallType.Receipt;
-    public type LocalCall = CallType.LocalCall;
-    //public type LocalCallAsync = CallType.LocalCallAsync;
+    public type CustomCall<T> = CallType.CustomCall<T>;
     public type TaskResult = CallType.TaskResult;
     public type Callee = TATypes.Callee;
     public type CalleeStatus = TATypes.CalleeStatus;
     public type Ttid = TATypes.Ttid; // from 1
     public type Toid = TATypes.Toid; // from 1
     public type Attempts = TATypes.Attempts;
-    public type Task = TATypes.Task;
-    public type AgentCallback = TATypes.AgentCallback;
-    public type Callback = TATypes.Callback;
-    public type TaskEvent = TATypes.TaskEvent;
+    public type Task<T> = TATypes.Task<T>;
+    public type AgentCallback<T> = TATypes.AgentCallback<T>;
+    public type TaskCallback<T> = TATypes.TaskCallback<T>;
+    public type TaskEvent<T> = TATypes.TaskEvent<T>;
     public type ErrorLog = TATypes.ErrorLog;
-    public type Data = {
-        tasks: Deque.Deque<(Ttid, Task)>; 
-        taskLogs: [(Ttid, TaskEvent)]; 
+    public type Data<T> = {
+        tasks: Deque.Deque<(Ttid, Task<T>)>; 
+        taskLogs: [(Ttid, TaskEvent<T>)]; 
         errorLogs: [(Nat, ErrorLog)]; 
         callees: [(Callee, CalleeStatus)]; 
         index: Nat; 
@@ -106,11 +103,11 @@ module {
     };
     
     /// limitNum: The actuator runs `limitNum` tasks at once.
-    public class TA(limitNum: Nat, autoClearTimeout: Int, this: Principal, localCall: LocalCall, /*localCallAsync: LocalCallAsync,*/ agentCallback: ?AgentCallback, taskCallback: ?Callback) {
-        var tasks = Deque.empty<(Ttid, Task)>(); /*fix*/
+    public class TA<T>(limitNum: Nat, autoClearTimeout: Int, call: CustomCall<T>, agentCallback: ?AgentCallback<T>, taskCallback: ?TaskCallback<T>) {
+        var tasks: Deque.Deque<(Ttid, Task<T>)> = Deque.empty<(Ttid, Task<T>)>(); /*fix*/
         var index : Nat = 1;
         var firstIndex : Nat = 1;
-        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent> (Nat.equal, natHash); /*fix*/
+        var taskLogs = TrieMap.TrieMap<Ttid, TaskEvent<T>> (Nat.equal, natHash); /*fix*/
         var errIndex : Nat = 1;
         var firstErrIndex : Nat = 1;
         var errorLogs = TrieMap.TrieMap<Nat, ErrorLog> (Nat.equal, natHash); /*fix*/
@@ -123,10 +120,10 @@ module {
         //     return receiption;
         // };
 
-        private func _push(_ttid: Ttid, _task: Task) : () {
+        private func _push(_ttid: Ttid, _task: Task<T>) : () {
             tasks := Deque.pushBack(tasks, (_ttid, _task));
         };
-        private func _update(_ttid: Ttid, _task: Task) : () {
+        private func _update(_ttid: Ttid, _task: Task<T>) : () {
             assert(_ttid < index);
             ignore _remove(_ttid);
             _push(_ttid, _task);
@@ -172,10 +169,10 @@ module {
         private func _size() : Nat {
             return List.size(tasks.0) + List.size(tasks.1);
         };
-        private func _toArray() : [(Ttid, Task)] {
+        private func _toArray() : [(Ttid, Task<T>)] {
             return arrayAppend(List.toArray(tasks.0), List.toArray(tasks.1));
         };
-        private func _filter(_ttid: Ttid, _task: Task) : Bool {
+        private func _filter<T>(_ttid: Ttid, _task: Task<T>) : Bool {
             for (preTtid in _task.preTtid.vals()){
                 if (preTtid > 0){
                     switch(taskLogs.get(preTtid)){
@@ -199,7 +196,7 @@ module {
             };
             return true;
         };
-        private func _preLog(_ttid: Ttid, _task: Task) : Attempts{
+        private func _preLog(_ttid: Ttid, _task: Task<T>) : Attempts{
             var attempts: Attempts = 1;
             switch(taskLogs.get(_ttid)){
                 case(?(taskLog)){
@@ -207,7 +204,7 @@ module {
                 };
                 case(_){};
             };
-            let taskLog: TaskEvent = {
+            let taskLog: TaskEvent<T> = {
                 toid = _task.toid;
                 ttid = _ttid;
                 task = _task;
@@ -223,7 +220,7 @@ module {
         private func _postLog(_ttid: Ttid, _result: TaskResult) : (){
             switch(taskLogs.get(_ttid)){
                 case(?(taskLog)){
-                    var log: TaskEvent = {
+                    var log: TaskEvent<T> = {
                         toid = taskLog.toid;
                         ttid = taskLog.ttid;
                         task = taskLog.task;
@@ -284,7 +281,7 @@ module {
         private func _callbackLog(_ttid: Ttid, _callbackStatus: ?Status) : (){
             switch(taskLogs.get(_ttid)){
                 case(?(taskLog)){
-                    let log: TaskEvent = {
+                    let log: TaskEvent<T> = {
                         toid = taskLog.toid;
                         ttid = taskLog.ttid;
                         task = taskLog.task;
@@ -398,12 +395,12 @@ module {
             };
         };
 
-        public func update(_ttid: Ttid, _task: Task) : Ttid {
+        public func update(_ttid: Ttid, _task: Task<T>) : Ttid {
             assert(_ttid > 0 and _ttid < index);
             _update(_ttid, _task);
             return _ttid;
         };
-        public func push(_task: Task) : Ttid {
+        public func push(_task: Task<T>) : Ttid {
             var ttid = index;
             index += 1;
             _push(ttid, _task);
@@ -422,15 +419,15 @@ module {
             var size: Nat = _size();
             var count: Nat = 0;
             var callCount: Nat = 0;
-            var receipt: ?CallType.Receipt = null;
+            var receipt: ?Receipt = null;
             var ttids: [Ttid] = Option.get(_ttids, []);
             actuationThreads += 1;
-            while (count < (if (ttids.size() == 0){ limitNum }else{ size * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
+            while (count < (if (ttids.size() == 0){ limitNum }else{ limitNum * 10 }) and callCount < size * 5 and Option.isSome(Deque.peekFront(tasks))){
                 lastActuationTime := Time.now();
                 switch(Deque.popFront(tasks)){
                     case(?((ttid, task_), deque)){
                         tasks := deque;
-                        var task: Task = task_;
+                        var task: Task<T> = task_;
                         var toRedo: Bool = true;
                         if(_filter(ttid, task) and (_ttids == null or Option.isSome(Array.find(ttids, func (t: Ttid): Bool{ t == ttid })))){
                             //get receipt
@@ -449,20 +446,14 @@ module {
                             //prelog
                             var attempts = _preLog(ttid, task); // attempts+1, set #Doing
                             //call
-                            var domain: CallType.Domain = #Canister(task.callee, task.cycles);
-                            switch(task.callType){
-                                case(#This(method)){ domain := #Local(localCall); };
-                                //case(#ThisAsync(method)){ domain := #Local(localCall); }; // /**comp**/
-                                case(_){};
-                            };
                             var result : TaskResult = (#Doing, null,null);
                             try{
-                                countAsyncMessage += 2;
-                                result := await* CallType.call(task.callType, domain, receipt);  // (Status, ?Receipt, ?Err)
-                                countAsyncMessage -= Nat.min(2, countAsyncMessage);
+                                countAsyncMessage += 3;
+                                result := await* CallType.call(task.callee, task.cycles, call, task.callType, receipt);  // (Status, ?Receipt, ?Err)
+                                countAsyncMessage -= Nat.min(3, countAsyncMessage);
                             }catch(e){ 
                                 result := (#Error, null, ?{code = Error.code(e); message = Error.message(e); });
-                                countAsyncMessage -= Nat.min(2, countAsyncMessage); 
+                                countAsyncMessage -= Nat.min(3, countAsyncMessage); 
                             };
                             lastActuationTime := Time.now();
                             var callbackStatus: ?Status = null;
@@ -485,7 +476,7 @@ module {
                                     case(_){
                                         switch(taskCallback){
                                             case(?(_taskCallback)){
-                                                try{ // Unable to catch error. If an error occurs, the status of this task is #Doing, and does not exist in the TaskPool
+                                                try{ 
                                                     countAsyncMessage += 2;
                                                     await _taskCallback("", ttid, task, result);
                                                     callbackStatus := ?#Done;
@@ -529,14 +520,17 @@ module {
             _clear(_expiration, _clearErr);
         };
         public func clearTasks() : (){
-            tasks := Deque.empty<(Ttid, Task)>();
+            tasks := Deque.empty<(Ttid, Task<T>)>();
         };
 
         public func isInPool(_ttid: Ttid) : Bool{
-            return Option.isSome(Array.find(_toArray(), func (item: (Ttid, Task)): Bool{ _ttid == item.0 }));
+            return Option.isSome(Array.find(_toArray(), func (item: (Ttid, Task<T>)): Bool{ _ttid == item.0 }));
         };
-        public func getTaskPool() : [(Ttid, Task)]{
+        public func getTaskPool() : [(Ttid, Task<T>)]{
             return _toArray();
+        };
+        public func getSize() : Nat{
+            return _size();
         };
         public func actuations() : {actuationThreads: Nat; lastActuationTime: Time.Time; countAsyncMessage: Nat}{
             return {actuationThreads = actuationThreads; lastActuationTime = lastActuationTime; countAsyncMessage = countAsyncMessage };
@@ -554,12 +548,12 @@ module {
                 case(_){ return false; };
             };
         };
-        public func getTaskEvent(_ttid: Ttid) : ?TaskEvent{
+        public func getTaskEvent(_ttid: Ttid) : ?TaskEvent<T>{
             return taskLogs.get(_ttid);
         };
         
-        public func getTaskEvents(_page: Nat, _size: Nat) : {data: [(Ttid, TaskEvent)]; totalPage: Nat; total: Nat}{
-            return getTM<TaskEvent>(taskLogs, index, firstIndex, _page, _size);
+        public func getTaskEvents(_page: Nat, _size: Nat) : {data: [(Ttid, TaskEvent<T>)]; totalPage: Nat; total: Nat}{
+            return getTM<TaskEvent<T>>(taskLogs, index, firstIndex, _page, _size);
         };
         public func getErrorLogs(_page: Nat, _size: Nat) : {data: [(Nat, ErrorLog)]; totalPage: Nat; total: Nat}{
             return getTM<ErrorLog>(errorLogs, errIndex, firstErrIndex, _page, _size);
@@ -568,7 +562,7 @@ module {
             return callees.get(_callee);
         };
 
-        public func getData() : Data {
+        public func getData() : Data<T> {
             return {
                 tasks = tasks;
                 taskLogs = Iter.toArray(taskLogs.entries());
@@ -580,8 +574,8 @@ module {
                 firstErrIndex = firstErrIndex;
             };
         };
-        public func getDataBase() : Data {
-            let _taskLogs = Iter.toArray(Iter.filter(taskLogs.entries(), func (x: (Ttid, TaskEvent)): Bool{
+        public func getDataBase() : Data<T> {
+            let _taskLogs = Iter.toArray(Iter.filter(taskLogs.entries(), func (x: (Ttid, TaskEvent<T>)): Bool{
                 x.1.time + 96*3600*1000000000 > Time.now() or x.1.result.0 == #Todo or x.1.result.0 == #Doing or 
                 List.some(Iter.toList(errorLogs.vals()), func (v: ErrorLog): Bool{ x.0 == v.ttid })
             }));
@@ -596,7 +590,7 @@ module {
                 firstErrIndex = firstErrIndex;
             };
         };
-        public func setData(_data: Data) : (){
+        public func setData(_data: Data<T>) : (){
             tasks := _data.tasks;
             taskLogs := TrieMap.fromEntries(_data.taskLogs.vals(), Nat.equal, natHash);
             errorLogs := TrieMap.fromEntries(_data.errorLogs.vals(), Nat.equal, natHash);

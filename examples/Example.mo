@@ -8,17 +8,25 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Nat "mo:base/Nat";
-import Iter "mo:base/Iter";
+import Nat64 "mo:base/Nat64";
+// import Iter "mo:base/Iter";
 import Time "mo:base/Time";
 import Option "mo:base/Option";
 import Error "mo:base/Error";
-import CallType "../src/CallType";
 import Principal "mo:base/Principal";
+import Binary "mo:icl/Binary";
+import CallType "../src/CallType";
 import TA "../src/TA";
 import SagaTM "../src/SagaTM";
 
 shared(installMsg) actor class Example() = this {
-    type CallType = CallType.CallType;
+    public type CustomCallType = { 
+        #This: {
+            #foo : (Nat);
+        };
+    };
+    type CallType = CallType.CallType<CustomCallType>;
+    type Task = SagaTM.Task<CustomCallType>;
     type TaskResult = CallType.TaskResult;
     private var tokenA_canister = Principal.fromText("ueghb-uqaaa-aaaak-aaioa-cai");
     private var tokenB_canister = Principal.fromText("udhbv-ziaaa-aaaak-aaioq-cai");
@@ -36,23 +44,24 @@ shared(installMsg) actor class Example() = this {
         };
         return na;
     };
-    private func foo(count: Nat) : (){
-        x += 100;
+    private func foo(_count: Nat) : Nat{
+        x += _count;
+        return x;
     };
-    private func _local(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
+    private func _localCall(_callee: Principal, _cycles: Nat, _args: CallType, _receipt: ?SagaTM.Receipt) : async (TaskResult){
         switch(_args){
-            case(#This(method)){
+            case(#custom(#This(method))){
                 switch(method){
                     case(#foo(count)){
                         var result = foo(count); // Receipt
-                        return (#Done, ?#This(#foo(result)), null);
+                        return (#Done, ?#result(?(Binary.BigEndian.fromNat64(Nat64.fromNat(result)), debug_show(result))), null);
                     };
                 };
             };
             case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
         };
     };
-    // private func _localAsync(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (SagaTM.TaskResult){
+    // private func _localAsync(_args: SagaTM.CallType, _receipt: ?SagaTM.Receipt) : async (TaskResult){
     //     switch(_args){
     //         case(#This(method)){
     //             switch(method){
@@ -65,21 +74,21 @@ shared(installMsg) actor class Example() = this {
     //         case(_){ return (#Error, null, ?{code=#future(9901); message="Non-local function."; });};
     //     };
     // };
-    private func _taskCallback(_name: Text, _tid: SagaTM.Ttid, _task: SagaTM.Task, _result: SagaTM.TaskResult) : async (){
+    private func _taskCallback(_name: Text, _tid: SagaTM.Ttid, _task: Task, _result: TaskResult) : async (){
         taskLogs := TA.arrayAppend(taskLogs, [(_tid, _task, _result)]);
     };
     private func _orderCallback(_name: Text, _oid: SagaTM.Toid, _status: SagaTM.OrderStatus, _data: ?Blob) : async (){
         orderLogs := TA.arrayAppend(orderLogs, [(_oid, _status)]);
     };
 
-    private stable var taskLogs: [(SagaTM.Ttid, SagaTM.Task, TaskResult)] = [];
+    private stable var taskLogs: [(SagaTM.Ttid, Task, TaskResult)] = [];
     private stable var orderLogs: [(SagaTM.Toid, SagaTM.OrderStatus)] = [];
-    private var saga: ?SagaTM.SagaTM = null;
-    private func _getSaga() : SagaTM.SagaTM {
+    private var saga: ?SagaTM.SagaTM<CustomCallType> = null;
+    private func _getSaga() : SagaTM.SagaTM<CustomCallType> {
         switch(saga){
             case(?(_saga)){ return _saga };
             case(_){
-                let _saga = SagaTM.SagaTM(Principal.fromActor(this), ?_local, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
+                let _saga = SagaTM.SagaTM<CustomCallType>(Principal.fromActor(this), ?_localCall, ?_taskCallback, ?_orderCallback); //?_taskCallback, ?_orderCallback
                 saga := ?_saga;
                 return _saga;
             };
@@ -89,7 +98,7 @@ shared(installMsg) actor class Example() = this {
     public query func getX() : async Nat{
         x;
     };
-    public query func getTaskLogs() : async [(SagaTM.Ttid, SagaTM.Task, TaskResult)]{
+    public query func getTaskLogs() : async [(SagaTM.Ttid, Task, TaskResult)]{
         return taskLogs;
     };
     public query func getOrderLogs() : async [(SagaTM.Toid, SagaTM.OrderStatus)]{
@@ -99,36 +108,17 @@ shared(installMsg) actor class Example() = this {
         taskLogs := [];
         orderLogs := [];
     };
-    public shared func balanceOf(_account: Text) : async (balanceA: Nat, balanceB: Nat){
-        let resA = await* CallType.call(#DRC20(#balanceOf(_account)), #Canister(tokenA_canister, 0), null);
-        let resB = await* CallType.call(#DRC20(#balanceOf(_account)), #Canister(tokenB_canister, 0), null);
-        var balanceA: Nat = 0;
-        if (resA.0 == #Done){
-            switch(resA.1){
-                case(?(#DRC20(#balanceOf(value)))){ balanceA := value; };
-                case(_){};
-            };
-        };
-        var balanceB: Nat = 0;
-        if (resB.0 == #Done){
-            switch(resB.1){
-                case(?(#DRC20(#balanceOf(value)))){ balanceB := value; };
-                case(_){};
-            };
-        };
-        return (balanceA, balanceB);
-    };
     public shared func claimTestTokens(_account: Text) : async (){
-        let act = TA.TA(50, 24*3600*1000000000, Principal.fromActor(this), _local, null, ?_taskCallback);
-        var task = _task(tokenA_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)), []);
-        let tid1 = act.push(task);
-        task := _task(tokenB_canister, #DRC20(#transfer(_account, 5000000000, null, null, null)), []);
-        let tid2 = act.push(task);
-        let f = act.run();
+        let act = TA.TA<CustomCallType>(50, 24*3600*1000000000, _localCall, null, ?_taskCallback);
+        var task = _task(tokenA_canister, #DRC20(#drc20_transfer(_account, 5000000000, null, null, null)), []);
+        let _tid1 = act.push(task);
+        task := _task(tokenB_canister, #DRC20(#drc20_transfer(_account, 5000000000, null, null, null)), []);
+        let _tid2 = act.push(task);
+        let _f = act.run();
     };
 
     
-    private func _buildTask(_businessId: ?Blob, _callee: Principal, _callType: SagaTM.CallType, _preTtid: [SagaTM.Ttid]) : SagaTM.PushTaskRequest{
+    private func _buildTask(_businessId: ?Blob, _callee: Principal, _callType: CallType, _preTtid: [SagaTM.Ttid]) : SagaTM.PushTaskRequest<CustomCallType>{
         return {
             callee = _callee;
             callType = _callType;
@@ -139,7 +129,7 @@ shared(installMsg) actor class Example() = this {
             data = _businessId;
         };
     };
-    private func _task(_callee: Principal, _callType: SagaTM.CallType, _preTtid: [SagaTM.Ttid]) : SagaTM.Task{
+    private func _task(_callee: Principal, _callType: CallType, _preTtid: [SagaTM.Ttid]) : Task{
         return {
             callee = _callee;
             callType = _callType;
@@ -170,16 +160,16 @@ shared(installMsg) actor class Example() = this {
         // tokenB: transfer contract -> caller  2.00000000
 
         let oid = _getSaga().create("swap1", #Forward, null, null);
-        var task = _buildTask(null, tokenA_canister, #DRC20(#transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
-        let tid1 =_getSaga().push(oid, task, null, null);
-        task := _buildTask(null, tokenB_canister, #DRC20(#transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
-        let tid2 =_getSaga().push(oid, task, null, null);
-        task := _buildTask(null, Principal.fromActor(this), #This(#foo(1)), []);
-        let tid3 =_getSaga().push(oid, task, null, null);
-        task := _buildTask(null, tokenA_canister, #DRC20(#transfer(to, valueA, null, null, null)), []);
-        let tid4 =_getSaga().push(oid, task, null, null);
-        task := _buildTask(null, tokenB_canister, #DRC20(#transfer(caller, valueB, null, null, null)), []);
-        let tid5 =_getSaga().push(oid, task, null, null);
+        var task = _buildTask(null, tokenA_canister, #DRC20(#drc20_transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
+        let _tid1 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
+        let _tid2 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, Principal.fromActor(this), #custom(#This(#foo(1))), []);
+        let _tid3 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenA_canister, #DRC20(#drc20_transfer(to, valueA, null, null, null)), []);
+        let _tid4 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transfer(caller, valueB, null, null, null)), []);
+        let _tid5 =_getSaga().push(oid, task, null, null);
         _getSaga().close(oid);
         let res = await _getSaga().run(oid);
         return (oid, res);
@@ -209,19 +199,19 @@ shared(installMsg) actor class Example() = this {
         // tokenB: transfer contract -> caller  2.00000000  // Block when an exception occurs
 
         let oid = _getSaga().create("swap2", #Backward, null, null);
-        var task = _buildTask(null, tokenA_canister, #DRC20(#transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
-        var comp = _buildTask(null, tokenA_canister, #DRC20(#transfer(caller, valueA, null, null, null)), []);
-        let tid1 =_getSaga().push(oid, task, ?comp, null);
-        task := _buildTask(null, tokenB_canister, #DRC20(#transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
-        comp := _buildTask(null, tokenB_canister, #DRC20(#transfer(to, valueB, null, null, null)), []);
-        let tid2 =_getSaga().push(oid, task, ?comp, null);
-        task := _buildTask(null, Principal.fromActor(this), #This(#foo(1)), []);
+        var task = _buildTask(null, tokenA_canister, #DRC20(#drc20_transferFrom(caller, contract, valueA+tokenFee, null, null, null)), []);
+        var comp = _buildTask(null, tokenA_canister, #DRC20(#drc20_transfer(caller, valueA, null, null, null)), []);
+        let _tid1 =_getSaga().push(oid, task, ?comp, null);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
+        comp := _buildTask(null, tokenB_canister, #DRC20(#drc20_transfer(to, valueB, null, null, null)), []);
+        let _tid2 =_getSaga().push(oid, task, ?comp, null);
+        task := _buildTask(null, Principal.fromActor(this), #custom(#This(#foo(1))), []);
         comp := _buildTask(null, Principal.fromActor(this), #__skip, []);
-        let tid3 =_getSaga().push(oid, task, ?comp, null);
-        task := _buildTask(null, tokenA_canister, #DRC20(#transfer(to, valueA, null, null, null)), []);
-        let tid4 =_getSaga().push(oid, task, null, null);
-        task := _buildTask(null, tokenB_canister, #DRC20(#transfer(caller, valueB, null, null, null)), []);
-        let tid5 =_getSaga().push(oid, task, null, null);
+        let _tid3 =_getSaga().push(oid, task, ?comp, null);
+        task := _buildTask(null, tokenA_canister, #DRC20(#drc20_transfer(to, valueA, null, null, null)), []);
+        let _tid4 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transfer(caller, valueB, null, null, null)), []);
+        let _tid5 =_getSaga().push(oid, task, null, null);
         _getSaga().close(oid);
         let res = await _getSaga().run(oid);
         return (oid, res);
@@ -229,10 +219,8 @@ shared(installMsg) actor class Example() = this {
     public shared(msg) func swap3(_to: Text): async (SagaTM.Toid, ?SagaTM.OrderStatus){
         let valueA: Nat = 100000000;
         let valueB: Nat = 200000000;
-        let tokenFee: Nat = 100000;
         let caller: Text = Principal.toText(msg.caller);
         let to: Text = _to;
-        let contract: Text =  Principal.toText(Principal.fromActor(this));
 
         // Transaction:
         // tokenA: lockTransfer caller -> to  1.00000000    comp: execute
@@ -242,40 +230,40 @@ shared(installMsg) actor class Example() = this {
         // tokenB: executeTransfer to -> caller  2.00000000
 
         let oid = _getSaga().create("swap3", #Backward, null, null);
-        var task = _buildTask(null, tokenA_canister, #DRC20(#lockTransferFrom(caller, to, valueA, 100000, null, null, null, null)), []);
-        var comp = _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
+        var task = _buildTask(null, tokenA_canister, #DRC20(#drc20_lockTransferFrom(caller, to, valueA, 100000, null, null, null, null)), []);
+        var comp = _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
         let tid1 =_getSaga().push(oid, task, ?comp, null);
-        task := _buildTask(null, tokenB_canister, #DRC20(#lockTransferFrom(to, caller, valueB, 100000, null, null, null, null)), []);
-        comp := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_lockTransferFrom(to, caller, valueB, 100000, null, null, null, null)), []);
+        comp := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#AutoFill, #fallback, null, null, null, null)), []);
         let tid2 =_getSaga().push(oid, task, ?comp, null);
-        task := _buildTask(null, Principal.fromActor(this), #This(#foo(1)), []);
+        task := _buildTask(null, Principal.fromActor(this), #custom(#This(#foo(1))), []);
         comp := _buildTask(null, Principal.fromActor(this), #__skip, []);
-        let tid3 =_getSaga().push(oid, task, null, null);
-        let res = await _getSaga().run(oid);
+        let _tid3 =_getSaga().push(oid, task, null, null);
+        let _res = await _getSaga().run(oid);
         var txid1 : Blob = Blob.fromArray([]);
         switch(_getSaga().getActuator().getTaskEvent(tid1)){
             case(?(event)){
                 switch(event.result.1){
-                    case(?(#DRC20(#executeTransfer(#ok(_txid))))){ txid1 := _txid };
+                    case(?(#DRC20(#drc20_executeTransfer(#ok(_txid))))){ txid1 := _txid };
                     case(_){};
                 };
             };
             case(_){ return (oid, await _getSaga().run(oid)); /* blocking */};
         };
-        task := _buildTask(null, tokenA_canister, #DRC20(#executeTransfer(#ManualFill(txid1), #sendAll, null, null, null, null)), []);
-        let tid4 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenA_canister, #DRC20(#drc20_executeTransfer(#ManualFill(txid1), #sendAll, null, null, null, null)), []);
+        let _tid4 =_getSaga().push(oid, task, null, null);
         var txid2 : Blob = Blob.fromArray([]);
         switch(_getSaga().getActuator().getTaskEvent(tid2)){
             case(?(event)){
                 switch(event.result.1){
-                    case(?(#DRC20(#executeTransfer(#ok(_txid))))){ txid2 := _txid };
+                    case(?(#DRC20(#drc20_executeTransfer(#ok(_txid))))){ txid2 := _txid };
                     case(_){};
                 };
             };
             case(_){ return (oid, await _getSaga().run(oid)); /* blocking */};
         };
-        task := _buildTask(null, tokenB_canister, #DRC20(#executeTransfer(#ManualFill(txid2), #sendAll, null, null, null, null)), []);
-        let tid5 =_getSaga().push(oid, task, null, null);
+        task := _buildTask(null, tokenB_canister, #DRC20(#drc20_executeTransfer(#ManualFill(txid2), #sendAll, null, null, null, null)), []);
+        let _tid5 =_getSaga().push(oid, task, null, null);
         _getSaga().close(oid);
         return (oid, await _getSaga().run(oid));
     };
@@ -324,13 +312,13 @@ shared(installMsg) actor class Example() = this {
     public query func ictc_getTOCount() : async Nat{
         return _getSaga().count();
     };
-    public query func ictc_getTO(_toid: SagaTM.Toid) : async ?SagaTM.Order{
+    public query func ictc_getTO(_toid: SagaTM.Toid) : async ?SagaTM.Order<CustomCallType>{
         return _getSaga().getOrder(_toid);
     };
-    public query func ictc_getTOs(_page: Nat, _size: Nat) : async {data: [(SagaTM.Toid, SagaTM.Order)]; totalPage: Nat; total: Nat}{
+    public query func ictc_getTOs(_page: Nat, _size: Nat) : async {data: [(SagaTM.Toid, SagaTM.Order<CustomCallType>)]; totalPage: Nat; total: Nat}{
         return _getSaga().getOrders(_page, _size);
     };
-    public query func ictc_getPool() : async {toPool: {total: Nat; items: [(SagaTM.Toid, ?SagaTM.Order)]}; ttPool: {total: Nat; items: [(SagaTM.Ttid, SagaTM.Task)]}}{
+    public query func ictc_getPool() : async {toPool: {total: Nat; items: [(SagaTM.Toid, ?SagaTM.Order<CustomCallType>)]}; ttPool: {total: Nat; items: [(SagaTM.Ttid, Task)]}}{
         let tos = _getSaga().getAliveOrders();
         let tts = _getSaga().getActuator().getTaskPool();
         return {
@@ -338,19 +326,19 @@ shared(installMsg) actor class Example() = this {
             ttPool = { total = tts.size(); items = slice(tts, 0, ?255)};
         };
     };
-    public query func ictc_getTOPool() : async [(SagaTM.Toid, ?SagaTM.Order)]{
+    public query func ictc_getTOPool() : async [(SagaTM.Toid, ?SagaTM.Order<CustomCallType>)]{
         return _getSaga().getAliveOrders();
     };
-    public query func ictc_getTT(_ttid: SagaTM.Ttid) : async ?SagaTM.TaskEvent{
+    public query func ictc_getTT(_ttid: SagaTM.Ttid) : async ?SagaTM.TaskEvent<CustomCallType>{
         return _getSaga().getActuator().getTaskEvent(_ttid);
     };
-    public query func ictc_getTTByTO(_toid: SagaTM.Toid) : async [SagaTM.TaskEvent]{
+    public query func ictc_getTTByTO(_toid: SagaTM.Toid) : async [SagaTM.TaskEvent<CustomCallType>]{
         return _getSaga().getTaskEvents(_toid);
     };
-    public query func ictc_getTTs(_page: Nat, _size: Nat) : async {data: [(SagaTM.Ttid, SagaTM.TaskEvent)]; totalPage: Nat; total: Nat}{
+    public query func ictc_getTTs(_page: Nat, _size: Nat) : async {data: [(SagaTM.Ttid, SagaTM.TaskEvent<CustomCallType>)]; totalPage: Nat; total: Nat}{
         return _getSaga().getActuator().getTaskEvents(_page, _size);
     };
-    public query func ictc_getTTPool() : async [(SagaTM.Ttid, SagaTM.Task)]{
+    public query func ictc_getTTPool() : async [(SagaTM.Ttid, Task)]{
         return _getSaga().getActuator().getTaskPool();
     };
     public query func ictc_getTTErrors(_page: Nat, _size: Nat) : async {data: [(Nat, SagaTM.ErrorLog)]; totalPage: Nat; total: Nat}{
@@ -384,7 +372,7 @@ shared(installMsg) actor class Example() = this {
     //     saga.close(_toid);
     //     return ttid;
     // };
-    public shared(msg) func ictc_appendTT(_businessId: ?Blob, _toid: SagaTM.Toid, _forTtid: ?SagaTM.Ttid, _callee: Principal, _callType: SagaTM.CallType, _preTtids: [SagaTM.Ttid]) : async SagaTM.Ttid{
+    public shared(msg) func ictc_appendTT(_businessId: ?Blob, _toid: SagaTM.Toid, _forTtid: ?SagaTM.Ttid, _callee: Principal, _callType: SagaTM.CallType<CustomCallType>, _preTtids: [SagaTM.Ttid]) : async SagaTM.Ttid{
         // Governance or manual compensation (operation allowed only when a transaction order is in blocking status).
         assert(_onlyIctcAdmin(msg.caller));
         assert(_onlyBlocking(_toid));
@@ -401,7 +389,7 @@ shared(installMsg) actor class Example() = this {
         assert(_onlyIctcAdmin(msg.caller));
         let saga = _getSaga();
         let ttid = saga.redo(_toid, _ttid);
-        let r = await saga.run(_toid);
+        let _r = await saga.run(_toid);
         return ttid;
     };
     /// set status of pending task
@@ -435,7 +423,7 @@ shared(installMsg) actor class Example() = this {
         assert(_onlyBlocking(_toid));
         let saga = _getSaga();
         saga.close(_toid);
-        let r = await saga.run(_toid);
+        let _r = await saga.run(_toid);
         try{
             let r = await* _getSaga().complete(_toid, _status);
             return r;
@@ -458,7 +446,7 @@ shared(installMsg) actor class Example() = this {
     public shared(msg) func ictc_runTT() : async Bool{ 
         // There is no need to call it normally, but can be called if you want to execute tasks in time when a TO is in the Doing state.
         assert(_onlyIctcAdmin(msg.caller));
-        let r = await _getSaga().run(0);
+        let _r = await _getSaga().run(0);
         return true;
     };
     /**
@@ -468,7 +456,7 @@ shared(installMsg) actor class Example() = this {
 
     // upgrade
     /// Saga
-    private stable var __sagaDataNew: ?SagaTM.Data = null;
+    private stable var __sagaDataNew: ?SagaTM.Data<CustomCallType> = null;
     system func preupgrade() {
         let data = _getSaga().getData();
         __sagaDataNew := ?data;

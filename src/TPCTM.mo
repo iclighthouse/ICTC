@@ -1,5 +1,5 @@
 /**
- * Module     : TPCTM.mo v0.5
+ * Module     : TPCTM.mo v3.0
  * Author     : ICLighthouse Team
  * Stability  : Experimental
  * Description: ICTC 2PC Transaction Manager.
@@ -8,32 +8,29 @@
 
 import Nat "mo:base/Nat";
 import Array "mo:base/Array";
-import Hash "mo:base/Hash";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Iter "mo:base/Iter";
 import List "mo:base/List";
-import Deque "mo:base/Deque";
 import TrieMap "mo:base/TrieMap";
 import Error "mo:base/Error";
 import TA "./TA";
 
 module {
-    public let Version: Nat = 8;
+    public let Version: Nat = 10;
     public type Toid = Nat;
     public type Ttid = TA.Ttid;
     public type Tcid = TA.Ttid;
     public type Callee = TA.Callee;
-    public type CallType = TA.CallType;
+    public type CallType<T> = TA.CallType<T>;
     public type Receipt = TA.Receipt;
-    public type Task = TA.Task;
+    public type Task<T> = TA.Task<T>;
     public type Status = TA.Status;
-    public type Callback = TA.Callback;
-    public type LocalCall = TA.LocalCall;
-    //public type LocalCallAsync = TA.LocalCallAsync;
+    public type TaskCallback<T> = TA.TaskCallback<T>;
+    public type CustomCall<T> = TA.CustomCall<T>;
     public type TaskResult = TA.TaskResult;
-    public type TaskEvent = TA.TaskEvent;
+    public type TaskEvent<T> = TA.TaskEvent<T>;
     public type ErrorLog = TA.ErrorLog;
     public type CalleeStatus = TA.CalleeStatus;
     public type Settings = {attemptsMax: ?TA.Attempts; recallInterval: ?Int; data: ?Blob};
@@ -42,75 +39,74 @@ module {
     public type OrderStatus = {#Todo; #Preparing; #Committing; #Compensating; #Blocking; #Done; #Aborted;};  // *
     //public type CompStrategy = { #Forward; #Backward; };
     public type OrderCallback = (_toName: Text, _toid: Toid, _status: OrderStatus, _data: ?Blob) -> async ();
-    public type TaskRequest = {
+    public type TaskRequest<T> = {
         callee: Callee;
-        callType: CallType;
+        callType: CallType<T>;
         preTtid: [Ttid];
         attemptsMax: ?Nat;
         recallInterval: ?Int; // nanoseconds
         cycles: Nat;
         data: ?Blob;
     };
-    public type TPCTask = {
+    public type TPCTask<T> = {
         ttid: Ttid;
-        prepare: Task;
-        commit: Task;
-        comp: ?Task; // for auto compensation
+        prepare: Task<T>;
+        commit: Task<T>;
+        comp: ?Task<T>; // for auto compensation
         status: Status;
     };
-    public type TPCCommit = {
+    public type TPCCommit<T> = {
         ttid: Ttid;
-        commit: Task;
+        commit: Task<T>;
         prepareTtid: Ttid;
         status: Status;
     };
-    public type TPCCompensate = {
+    public type TPCCompensate<T> = {
         forTtid: Ttid;
         tcid: Tcid;
-        comp: Task;
+        comp: Task<T>;
         status: Status;
     };
-    public type Order = {
+    public type Order<T> = {
         name: Text;
-        tasks: List.List<TPCTask>;
-        commits: List.List<TPCCommit>;
-        comps: List.List<TPCCompensate>;
+        tasks: List.List<TPCTask<T>>;
+        commits: List.List<TPCCommit<T>>;
+        comps: List.List<TPCCompensate<T>>;
         allowPushing: {#Opening; #Closed;};
         status: OrderStatus;  // *
         callbackStatus: ?Status;
         time: Time.Time;
         data: ?Blob;
     };
-    public type Data = {
+    public type Data<T> = {
         autoClearTimeout: Int; 
         index: Nat; 
         firstIndex: Nat; 
-        orders: [(Toid, Order)]; 
+        orders: [(Toid, Order<T>)]; 
         aliveOrders: List.List<(Toid, Time.Time)>; 
         taskEvents: [(Toid, [Ttid])];
-        actuator: TA.Data; 
+        actuator: TA.Data<T>; 
     };
 
-    public class TPCTM(this: Principal, localCall: ?LocalCall, /*localCallAsync: ?LocalCallAsync,*/ defaultTaskCallback: ?Callback, defaultOrderCallback: ?OrderCallback) {
+    public class TPCTM<T>(this: Principal, customCall: ?CustomCall<T>, defaultTaskCallback: ?TaskCallback<T>, defaultOrderCallback: ?OrderCallback) {
         let limitAtOnce: Nat = 20;
         var autoClearTimeout: Int = 3*30*24*3600*1000000000; // 3 months
         var index: Toid = 1;
         var firstIndex: Toid = 1;
-        var orders = TrieMap.TrieMap<Toid, Order>(Nat.equal, TA.natHash);
+        var orders = TrieMap.TrieMap<Toid, Order<T>>(Nat.equal, TA.natHash);
         var aliveOrders = List.nil<(Toid, Time.Time)>();
         var taskEvents = TrieMap.TrieMap<Toid, [Ttid]>(Nat.equal, TA.natHash);
-        var actuator_: ?TA.TA = null;
-        var taskCallback = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash);
-        var commitCallbackTemp = TrieMap.TrieMap<Ttid, Callback>(Nat.equal, TA.natHash);
+        var actuator_: ?TA.TA<T> = null;
+        var taskCallback = TrieMap.TrieMap<Ttid, TaskCallback<T>>(Nat.equal, TA.natHash);
+        var commitCallbackTemp = TrieMap.TrieMap<Ttid, TaskCallback<T>>(Nat.equal, TA.natHash);
         var orderCallback = TrieMap.TrieMap<Toid, OrderCallback>(Nat.equal, TA.natHash);
         var countAsyncMessage : Nat = 0;
-        private func actuator() : TA.TA {
+        private func actuator() : TA.TA<T> {
             switch(actuator_){
                 case(?(_actuator)){ return _actuator; };
                 case(_){
-                    let localCall_ = Option.get(localCall, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    //let localCallAsync_ = Option.get(localCallAsync, func (ct: CallType, r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No local function proxy specified"; }) });
-                    let act = TA.TA(limitAtOnce, autoClearTimeout, this, localCall_, /*localCallAsync_,*/ ?_taskCallbackProxy, null);
+                    let call_ = Option.get(customCall, func (_callee: Principal, _cycles: Nat, _ct: CallType<T>, _r: ?Receipt): async (TaskResult){ (#Error, null, ?{code = #future(9902); message = "No custom calling function proxy specified"; }) });
+                    let act = TA.TA<T>(limitAtOnce, autoClearTimeout, call_, ?_taskCallbackProxy, null);
                     actuator_ := ?act;
                     return act;
                 };
@@ -119,7 +115,7 @@ module {
         };
 
         // Unique callback entrance. This function will call each specified callback of task
-        private func _taskCallbackProxy(_ttid: Ttid, _task: Task, _result: TaskResult) : async* (){
+        private func _taskCallbackProxy(_ttid: Ttid, _task: Task<T>, _result: TaskResult) : async* (){
             let toid = Option.get(_task.toid, 0);
             switch(_status(toid)){
                 case(?(#Todo)){ _setStatus(toid, #Preparing); };
@@ -308,7 +304,7 @@ module {
         private func _inAliveOrders(_toid: Toid): Bool{
             return Option.isSome(List.find(aliveOrders, func (item: (Toid, Time.Time)): Bool{ item.0 == _toid }));
         };
-        private func _pushOrder(_toid: Toid, _order: Order): (){
+        private func _pushOrder(_toid: Toid, _order: Order<T>): (){
             orders.put(_toid, _order);
             _clear(null, false);
         };
@@ -353,7 +349,7 @@ module {
             };
         };
 
-        private func _taskFromRequest(_toid: Toid, _forTtid: ?Ttid, _task: TaskRequest) : TA.Task{
+        private func _taskFromRequest(_toid: Toid, _forTtid: ?Ttid, _task: TaskRequest<T>) : TA.Task<T>{
             return {
                 callee = _task.callee; 
                 callType = _task.callType; 
@@ -367,8 +363,8 @@ module {
                 time = Time.now();
             };
         };
-        private func _compFromRequest(_toid: Toid, _forTtid: ?Ttid, _comp: ?TaskRequest) : ?Task{
-            var comp: ?Task = null;
+        private func _compFromRequest(_toid: Toid, _forTtid: ?Ttid, _comp: ?TaskRequest<T>) : ?Task<T>{
+            var comp: ?Task<T> = null;
             switch(_comp){
                 case(?(compensation)){
                     comp := ?{
@@ -424,7 +420,7 @@ module {
         private func _getCommitTtid(_toid: Toid, _prepareTtid: Ttid) : Ttid{
             switch(orders.get(_toid)){
                 case(?(order)){
-                    switch(List.find(order.commits, func (t:TPCCommit): Bool{ t.prepareTtid == _prepareTtid })){
+                    switch(List.find(order.commits, func (t:TPCCommit<T>): Bool{ t.prepareTtid == _prepareTtid })){
                         case(?(commit)){ return commit.ttid; };
                         case(_){ return 0;  };
                     };
@@ -435,12 +431,12 @@ module {
         // private func _inOrderPrepares(_toid: Toid, _ttid: Ttid) : Bool{
         //     switch(orders.get(_toid)){
         //         case(?(order)){
-        //             return Option.isSome(List.find(order.tasks, func (t:TPCTask): Bool{ t.ttid == _ttid }));
+        //             return Option.isSome(List.find(order.tasks, func (t:TPCTask<T>): Bool{ t.ttid == _ttid }));
         //         };
         //         case(_){ return false; };
         //     };
         // };
-        private func _putTask(_toid: Toid, _task: TPCTask) : (){
+        private func _putTask(_toid: Toid, _task: TPCTask<T>) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
                     assert(order.allowPushing == #Opening);
@@ -464,10 +460,10 @@ module {
                 aliveOrders := List.push((_toid, Time.now()), aliveOrders);
             };
         };
-        private func _updateTask(_toid: Toid, _task: TPCTask) : (){
+        private func _updateTask(_toid: Toid, _task: TPCTask<T>) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
-                    let tasks = List.map(order.tasks, func (t:TPCTask):TPCTask{
+                    let tasks = List.map(order.tasks, func (t:TPCTask<T>):TPCTask<T>{
                         if (t.ttid == _task.ttid){ _task } else { t };
                     });
                     let orderNew = {
@@ -493,7 +489,7 @@ module {
         private func _removeTask(_toid: Toid, _ttid: Ttid) : (){
             switch(orders.get(_toid)){
                 case(?(order)){
-                    let tasks = List.filter(order.tasks, func (t:TPCTask): Bool{ t.ttid != _ttid });
+                    let tasks = List.filter(order.tasks, func (t:TPCTask<T>): Bool{ t.ttid != _ttid });
                     let orderNew = {
                         name = order.name;
                         tasks = tasks;
@@ -677,26 +673,26 @@ module {
                 case(_){};
             };
         };
-        private func _getTask(_toid: Toid, _ttid: Ttid) : ?TPCTask{
+        private func _getTask(_toid: Toid, _ttid: Ttid) : ?TPCTask<T>{
             switch(orders.get(_toid)){
                 case(?(order)){
-                    return List.find(order.tasks, func (t:TPCTask): Bool{ t.ttid == _ttid });
+                    return List.find(order.tasks, func (t:TPCTask<T>): Bool{ t.ttid == _ttid });
                 };
                 case(_){ return null; };
             };
         };
-        private func _getCommit(_toid: Toid, _ttid: Ttid) : ?TPCCommit{
+        private func _getCommit(_toid: Toid, _ttid: Ttid) : ?TPCCommit<T>{
             switch(orders.get(_toid)){
                 case(?(order)){
-                    return List.find(order.commits, func (t:TPCCommit): Bool{ t.ttid == _ttid });
+                    return List.find(order.commits, func (t:TPCCommit<T>): Bool{ t.ttid == _ttid });
                 };
                 case(_){ return null; };
             };
         };
-        private func _getComp(_toid: Toid, _tcid: Tcid) : ?TPCCompensate{
+        private func _getComp(_toid: Toid, _tcid: Tcid) : ?TPCCompensate<T>{
             switch(orders.get(_toid)){
                 case(?(order)){
-                    return List.find(order.comps, func (t:TPCCompensate): Bool{ t.tcid == _tcid });
+                    return List.find(order.comps, func (t:TPCCompensate<T>): Bool{ t.tcid == _tcid });
                 };
                 case(_){ return null; };
             };
@@ -742,12 +738,12 @@ module {
                 case(_){};
             };
         };
-        private func _pushCommit(_toid: Toid, _ttid: Ttid, _commit: Task, _preTtid: ?[Ttid]) : Ttid{
+        private func _pushCommit(_toid: Toid, _ttid: Ttid, _commit: Task<T>, _preTtid: ?[Ttid]) : Ttid{
             if (not(_inOrders(_toid))){ return 0; };
             //let preTtid = Option.get(_orderLastTtid(_toid, #Commit), 0);
             var preTtids: [Ttid] = [];
             //if (preTtid > 0){ preTtids := [preTtid]; };
-            let task: Task = {
+            let task: Task<T> = {
                 callee = _commit.callee;
                 callType = _commit.callType;
                 preTtid = Option.get(_preTtid, preTtids);
@@ -760,7 +756,7 @@ module {
                 time = Time.now();
             };
             let cid = actuator().push(task);
-            let commit: TPCCommit = {
+            let commit:  TPCCommit<T> = {
                 ttid = cid;
                 commit = task;
                 prepareTtid = _ttid;
@@ -828,12 +824,12 @@ module {
         // private func _inOrderComps(_toid: Toid, _tcid: Tcid) : Bool{
         //     switch(orders.get(_toid)){
         //         case(?(order)){
-        //             return Option.isSome(List.find(order.comps, func (t:TPCCompensate): Bool{ t.tcid == _tcid }));
+        //             return Option.isSome(List.find(order.comps, func (t:TPCCompensate<T>): Bool{ t.tcid == _tcid }));
         //         };
         //         case(_){ return false; };
         //     };
         // };
-        private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Task, _preTtid: ?[Ttid]) : Tcid{
+        private func _pushComp(_toid: Toid, _ttid: Ttid, _comp: Task<T>, _preTtid: ?[Ttid]) : Tcid{
             if (not(_inOrders(_toid))){ return 0; };
             var preTtids: [Ttid] = [];
             let preTtid = Option.get(_orderLastTtid(_toid, #Compensate), 0);
@@ -841,7 +837,7 @@ module {
                 preTtids := [preTtid];
             };
             //if (preTtid > 0){ preTtids := [preTtid]; };
-            let task: Task = {
+            let task: Task<T> = {
                 callee = _comp.callee;
                 callType = _comp.callType;
                 preTtid = Option.get(_preTtid, preTtids);
@@ -854,7 +850,7 @@ module {
                 time = Time.now();
             };
             let cid = actuator().push(task);
-            let compTask: TPCCompensate = {
+            let compTask:  TPCCompensate<T> = {
                 forTtid = _ttid;
                 tcid = cid;
                 comp = task;
@@ -892,7 +888,7 @@ module {
                                 if (task.status == #Done){
                                     switch(task.comp){
                                         case(?(comp)){
-                                            let cid = _pushComp(_toid, task.ttid, comp, null);
+                                            ignore _pushComp(_toid, task.ttid, comp, null);
                                         };
                                         case(_){ // ignore
                                         };
@@ -914,7 +910,7 @@ module {
                     var tasks = order.tasks;
                     var commits = order.commits;
                     var comps = order.comps;
-                    tasks := List.map(tasks, func (t:TPCTask): TPCTask{
+                    tasks := List.map(tasks, func (t:TPCTask<T>): TPCTask<T>{
                         if (t.ttid == _ttid){
                             res := true;
                             return {
@@ -926,7 +922,7 @@ module {
                             };
                         } else { return t; };
                     });
-                    commits := List.map(commits, func (t:TPCCommit): TPCCommit{
+                    commits := List.map(commits, func (t:TPCCommit<T>): TPCCommit<T>{
                         if (t.ttid == _ttid){
                             res := true;
                             return {
@@ -937,7 +933,7 @@ module {
                             };
                         } else { return t; };
                     });
-                    comps := List.map(comps, func (t:TPCCompensate): TPCCompensate{
+                    comps := List.map(comps, func (t:TPCCompensate<T>): TPCCompensate<T>{
                         if (t.tcid == _ttid){
                             res := true;
                             return {
@@ -948,7 +944,7 @@ module {
                             };
                         } else { return t; };
                     });
-                    let orderNew : Order = {
+                    let orderNew : Order<T> = {
                         name = order.name;
                         tasks = tasks;
                         commits = commits;
@@ -965,13 +961,13 @@ module {
             };
             return res;
         };
-        private func __push(_toid: Toid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest) : Ttid {
+        private func __push(_toid: Toid, _prepare: TaskRequest<T>, _commit: TaskRequest<T>, _comp: ?TaskRequest<T>) : Ttid {
             assert(_inOrders(_toid) and _isOpening(_toid));
-            let prepare: TA.Task = _taskFromRequest(_toid, null, _prepare);
+            let prepare: TA.Task<T> = _taskFromRequest(_toid, null, _prepare);
             let tid1 = actuator().push(prepare);
-            let commit: TA.Task = _taskFromRequest(_toid, ?tid1, _commit);
+            let commit: TA.Task<T> = _taskFromRequest(_toid, ?tid1, _commit);
             let comp = _compFromRequest(_toid, ?tid1, _comp);
-            let tpcTask: TPCTask = {
+            let tpcTask: TPCTask<T> = {
                 ttid = tid1;
                 prepare = prepare;
                 commit = commit;
@@ -987,11 +983,11 @@ module {
             assert(this != Principal.fromText("aaaaa-aa"));
             let toid = index;
             index += 1;
-            let order: Order = {
+            let order: Order<T> = {
                 name = _name;
-                tasks = List.nil<TPCTask>();
-                commits = List.nil<TPCCommit>();
-                comps = List.nil<TPCCompensate>();
+                tasks = List.nil<TPCTask<T>>();
+                commits = List.nil<TPCCommit<T>>();
+                comps = List.nil<TPCCompensate<T>>();
                 allowPushing = #Opening;
                 progress = #Completed(0);
                 status = #Todo;
@@ -1006,8 +1002,8 @@ module {
             };
             return toid;
         };
-        public func push(_toid: Toid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest, 
-        _prepareCallback: ?Callback, _commitCallback: ?Callback) : Ttid{
+        public func push(_toid: Toid, _prepare: TaskRequest<T>, _commit: TaskRequest<T>, _comp: ?TaskRequest<T>, 
+        _prepareCallback: ?TaskCallback<T>, _commitCallback: ?TaskCallback<T>) : Ttid{
             let ttid = __push(_toid, _prepare, _commit, _comp);
             switch(_prepareCallback){
                 case(?(callback)){ taskCallback.put(ttid, callback); };
@@ -1045,14 +1041,14 @@ module {
                     case(?(order)){
                         if (order.status != #Done and order.status != #Aborted and not(_isTasksDone(_toid))){
                             //var taskStatus : Status = #Unknown;
-                            var task_ : ?Task = null;
-                            switch(List.find(order.tasks, func (t:TPCTask): Bool{ t.ttid == _ttid })){
+                            var task_ : ?Task<T> = null;
+                            switch(List.find(order.tasks, func (t:TPCTask<T>): Bool{ t.ttid == _ttid })){
                                 case(?(tpcTask)){ 
                                     task_ := ?tpcTask.prepare;
                                 };
                                 case(_){};
                             };
-                            switch(List.find(order.commits, func (t:TPCCommit): Bool{ t.ttid == _ttid })){
+                            switch(List.find(order.commits, func (t:TPCCommit<T>): Bool{ t.ttid == _ttid })){
                                 case(?(tpcTask)){ 
                                     task_ := ?tpcTask.commit;
                                 };
@@ -1101,7 +1097,7 @@ module {
             let actuations = actuator().actuations();
             if (actuations.actuationThreads == 0 or Time.now() > actuations.lastActuationTime + 60*1000000000){ // 60s
                 try{ 
-                    let count = await* actuator().run(); 
+                    ignore await* actuator().run(); 
                 }catch(e){};
             };
             if (_toid > 0){
@@ -1120,7 +1116,7 @@ module {
             if (actuations.actuationThreads > 10){
                 throw Error.reject("ICTC execution threads exceeded the limit.");
             };
-            let count = await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
+            ignore await* actuator().runSync(if (_toid > 0) { ?_getTtids(_toid) } else { null }); 
             if (_toid > 0){
                 try{ await* _statusTest(_toid); }catch(e){};
             };
@@ -1143,21 +1139,21 @@ module {
         public func isTaskCompleted(_ttid: Ttid) : Bool{
             return actuator().isCompleted(_ttid);
         };
-        public func getOrder(_toid: Toid) : ?Order{
+        public func getOrder(_toid: Toid) : ?Order<T>{
             return orders.get(_toid);
         };
-        public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order)]; totalPage: Nat; total: Nat}{
-            return TA.getTM<Order>(orders, index, firstIndex, _page, _size);
+        public func getOrders(_page: Nat, _size: Nat) : {data: [(Toid, Order<T>)]; totalPage: Nat; total: Nat}{
+            return TA.getTM<Order<T>>(orders, index, firstIndex, _page, _size);
         };
-        public func getAliveOrders() : [(Toid, ?Order)]{
-            return Array.map<(Toid, Time.Time), (Toid, ?Order)>(List.toArray(aliveOrders), 
-                func (item:(Toid, Time.Time)):(Toid, ?Order) { 
+        public func getAliveOrders() : [(Toid, ?Order<T>)]{
+            return Array.map<(Toid, Time.Time), (Toid, ?Order<T>)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)):(Toid, ?Order<T>) { 
                     return (item.0, orders.get(item.0));
                 });
         };
-        public func getBlockingOrders() : [(Toid, Order)]{
-            return Array.mapFilter<(Toid, Time.Time), (Toid, Order)>(List.toArray(aliveOrders), 
-                func (item:(Toid, Time.Time)): ?(Toid, Order) { 
+        public func getBlockingOrders() : [(Toid, Order<T>)]{
+            return Array.mapFilter<(Toid, Time.Time), (Toid, Order<T>)>(List.toArray(aliveOrders), 
+                func (item:(Toid, Time.Time)): ?(Toid, Order<T>) { 
                     switch(orders.get(item.0)){
                         case(?order){
                             if (order.status == #Blocking){
@@ -1170,8 +1166,8 @@ module {
                     };
                 });
         };
-        public func getTaskEvents(_toid: Toid) : [TaskEvent]{
-            var events: [TaskEvent] = [];
+        public func getTaskEvents(_toid: Toid) : [TaskEvent<T>]{
+            var events: [TaskEvent<T>] = [];
             for (tid in Option.get(taskEvents.get(_toid), []).vals()){
                 let event_ =  actuator().getTaskEvent(tid);
                 switch(event_){
@@ -1187,7 +1183,7 @@ module {
         // public func getAllEvents(_page: Nat, _size: Nat) : {data: [(Tid, TaskEvent)]; totalPage: Nat; total: Nat}{ 
         //     return actuator().getTaskEvents(_page, _size);
         // };
-        public func getActuator() : TA.TA{
+        public func getActuator() : TA.TA<T>{
             return actuator();
         };
         
@@ -1203,15 +1199,15 @@ module {
         
         // The following methods are used for governance or manual compensation.
         /// update: Used to modify a task when blocking.
-        public func update(_toid: Toid, _ttid: Ttid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest, 
-        _prepareCallback: ?Callback, _commitCallback: ?Callback) : Ttid{
+        public func update(_toid: Toid, _ttid: Ttid, _prepare: TaskRequest<T>, _commit: TaskRequest<T>, _comp: ?TaskRequest<T>, 
+        _prepareCallback: ?TaskCallback<T>, _commitCallback: ?TaskCallback<T>) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             assert(not(actuator().isCompleted(_ttid)));
-            let prepare: TA.Task = _taskFromRequest(_toid, null, _prepare);
+            let prepare: TA.Task<T> = _taskFromRequest(_toid, null, _prepare);
             let tid = actuator().update(_ttid, prepare);
             let commit = _taskFromRequest(_toid, ?tid, _commit);
             let comp = _compFromRequest(_toid, ?tid, _comp);
-            let tpcTask: TPCTask = {
+            let tpcTask: TPCTask<T> = {
                 ttid = tid;
                 prepare = prepare;
                 commit = commit;
@@ -1243,8 +1239,8 @@ module {
         };
         
         /// append: Used to add a new task to an executing transaction order.
-        public func append(_toid: Toid, _prepare: TaskRequest, _commit: TaskRequest, _comp: ?TaskRequest, 
-        _prepareCallback: ?Callback, _commitCallback: ?Callback) : Ttid{
+        public func append(_toid: Toid, _prepare: TaskRequest<T>, _commit: TaskRequest<T>, _comp: ?TaskRequest<T>, 
+        _prepareCallback: ?TaskCallback<T>, _commitCallback: ?TaskCallback<T>) : Ttid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             let ttid = __push(_toid, _prepare, _commit, _comp);
             switch(_prepareCallback){
@@ -1257,7 +1253,7 @@ module {
             };
             return ttid;
         };
-        public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: TaskRequest, _callback: ?Callback) : Tcid{
+        public func appendComp(_toid: Toid, _forTtid: Ttid, _comp: TaskRequest<T>, _callback: ?TaskCallback<T>) : Tcid{
             assert(_inOrders(_toid) and _isOpening(_toid) and not(isCompleted(_toid)));
             let comp = _taskFromRequest(_toid, ?_forTtid, _comp);
             let tcid = _pushComp(_toid, _forTtid, comp, ?comp.preTtid);
@@ -1350,7 +1346,7 @@ module {
         };
 
         // The following methods are used for data backup and reset.
-        public func getData() : Data {
+        public func getData() : Data<T> {
             return {
                 autoClearTimeout = autoClearTimeout; 
                 index = index; 
@@ -1363,12 +1359,12 @@ module {
                 actuator = actuator().getData(); 
             };
         };
-        public func getDataBase() : Data {
-            let _orders = Iter.toArray(Iter.filter(orders.entries(), func (x: (Toid, Order)): Bool{
+        public func getDataBase() : Data<T> {
+            let _orders = Iter.toArray(Iter.filter(orders.entries(), func (x: (Toid, Order<T>)): Bool{
                 x.1.time + 72*3600*1000000000 > Time.now() or List.some(aliveOrders, func (t: (Toid, Time.Time)): Bool{ x.0 == t.0 })
             }));
             let _taskEvents = Iter.toArray(Iter.filter(taskEvents.entries(), func (x: (Toid, [Ttid])): Bool{
-                Option.isSome(Array.find(_orders, func (t: (Toid, Order)): Bool{ x.0 == t.0 }))
+                Option.isSome(Array.find(_orders, func (t: (Toid, Order<T>)): Bool{ x.0 == t.0 }))
             }));
             return {
                 autoClearTimeout = autoClearTimeout; 
@@ -1380,7 +1376,7 @@ module {
                 actuator = actuator().getDataBase(); 
             };
         };
-        public func setData(_data: Data) : (){
+        public func setData(_data: Data<T>) : (){
             autoClearTimeout := _data.autoClearTimeout;
             index := _data.index; 
             firstIndex := _data.firstIndex; 

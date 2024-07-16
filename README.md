@@ -77,8 +77,13 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 - ICTC Framework v1.0 (done)
 - ICTC Framework v1.5  (done)
 - ICTC Framework v2.0  (done)
+- ICTC Framework v3.0  (done)
 
 ## Reference Docs
+
+Note: Version 3.0 is not compatible with version 2.0 and requires refactoring your code to upgrade.
+
+[ICTC v3.0 Reference](./docs/ictc_reference-3.0.md)
 
 [ICTC v2.0 Reference](./docs/ictc_reference-2.0.md)
 
@@ -86,9 +91,73 @@ The Transaction Compensator function is implemented in Transaction Manager and i
 
 [ICTC v1.0 Reference](./docs/ictc_reference.md)
 
+## Use in vessel
+
+package-set.dhall
+```
+    ...
+    { dependencies = [ "base", "icl" ] : List Text
+    , name = "ictc"
+    , repo = "https://github.com/iclighthouse/ICTC"
+    , version = "-- commit hash --"
+    }
+    ...
+```
+
+vessel.dhall
+```
+    {
+    dependencies = [ "base", "icl", "ictc" ],
+    compiler = None Text
+    }
+```
+
+motoko
+```
+import CallType "mo:ictc/CallType";
+import TA "mo:ictc/TA";
+import SagaTM "mo:ictc/SagaTM";
+```
+
+## ICTC explorer
+
+https://cmqwp-uiaaa-aaaaj-aihzq-cai.raw.ic0.app/
+
 ## Examples
 
-![Example](img/ictc-example.png)
+```
+public shared(msg) func foo(): async (SagaTM.Toid, ?SagaTM.OrderStatus){
+    let valueA: Nat = 100000000; // TokenA
+    let valueB: Nat = 200000000; // TokenB
+    let tokenFee: Nat = 100000; // TokenA & TokenB
+    let owner: Text = Principal.toText(msg.caller);
+    let to: Text = "xxxxx(principal)xxxxx";
+    let contract: Text =  Principal.toText(Principal.fromActor(this));
+
+    // Create a Saga transaction order (TO).
+    let oid = _getSaga().create("swap", #Forward, null, null); 
+
+    // Push tasks into TO.
+    var task = _buildTask(null, tokenA_canister, #DRC20(#drc20_transferFrom(owner, contract, valueA+tokenFee, null, null, null)), []);
+    let _tid1 =_getSaga().push(oid, task, null, null); 
+    task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transferFrom(to, contract, valueB+tokenFee, null, null, null)), []);
+    let _tid2 =_getSaga().push(oid, task, null, null);
+    task := _buildTask(null, Principal.fromActor(this), #custom(#This(#foo(1))), []);
+    let _tid3 =_getSaga().push(oid, task, null, null);
+    task := _buildTask(null, tokenA_canister, #DRC20(#drc20_transfer(to, valueA, null, null, null)), []);
+    let _tid4 =_getSaga().push(oid, task, null, null);
+    task := _buildTask(null, tokenB_canister, #DRC20(#drc20_transfer(owner, valueB, null, null, null)), []);
+    let _tid5 =_getSaga().push(oid, task, null, null);
+
+    // After this, no further push tasks are allowed.
+    _getSaga().close(oid); 
+
+    // Execute the transaction order (TO), where all tasks are executed sequentially and synchronously, and if one of the tasks is failed, the whole TO will be suspended and marked as "Blocking".
+    let res = await _getSaga().run(oid); 
+    
+    return (oid, res);
+};
+```
 
 ### Example.mo (Saga)
 
