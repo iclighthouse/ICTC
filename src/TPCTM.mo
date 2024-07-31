@@ -1309,7 +1309,7 @@ module {
         };
         public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async* Bool{
             assert(_status == #Done or _status == #Aborted);
-            if (_inAliveOrders(_toid) and not(_isOpening(_toid)) and (_isTasksDone(_toid) or _isCompsDone(_toid))){
+            if (_inAliveOrders(_toid) and not(_isOpening(_toid))){
                 _setStatus(_toid, _status);
                 if(_toCallback){
                     var callbackStatus : ?Status = null;

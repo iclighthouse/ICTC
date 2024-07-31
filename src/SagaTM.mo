@@ -574,7 +574,7 @@ module {
                         case((?(task), ts)){
                             return actuator().isCompleted(task.tcid);
                         };
-                        case(_){ return true; };
+                        case(_){ return false; };
                     };
                 };
                 case(_){ return false; };
@@ -595,7 +595,7 @@ module {
                         };
                         _setCallbackStatus(_toid, callbackStatus);
                         //await _orderComplete(_toid, #Done);
-                    } else if (order.status == #Compensating and order.allowPushing == #Closed and _isCompsDone(_toid)){
+                    } else if (order.status == #Compensating and order.allowPushing == #Closed and (_isCompsDone(_toid) or List.size(order.comps) == 0)){
                         _setStatus(_toid, #Recovered);
                         var callbackStatus : ?Status = null;
                         try{ 
@@ -1083,7 +1083,7 @@ module {
         };
         public func done(_toid: Toid, _status: OrderStatus, _toCallback: Bool) : async* Bool{
             assert(_status == #Done or _status == #Recovered);
-            if (_inAliveOrders(_toid) and not(_isOpening(_toid)) and (_isTasksDone(_toid) or _isCompsDone(_toid))){
+            if (_inAliveOrders(_toid) and not(_isOpening(_toid))){
                 _setStatus(_toid, _status);
                 if(_toCallback){
                     var callbackStatus : ?Status = null;
