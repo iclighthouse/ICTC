@@ -499,6 +499,24 @@ module {
                                 //callbacklog
                                 _callbackLog(ttid, callbackStatus);
                                 toRedo := false;
+                            }else if (attempts < task.attemptsMax){
+                                switch(taskLogs.get(ttid)){
+                                    case(?(taskLog)){
+                                        var log: TaskEvent<T> = {
+                                            toid = taskLog.toid;
+                                            ttid = taskLog.ttid;
+                                            task = taskLog.task;
+                                            attempts = taskLog.attempts;
+                                            result = (taskLog.result.0, result.1, errorMsg);
+                                            callbackStatus = taskLog.callbackStatus;
+                                            time = taskLog.time;
+                                            txHash = taskLog.txHash;
+                                        };
+                                        taskLogs.put(ttid, log);
+                                    };
+                                    case(_){};
+                                };
+                                toRedo := true;
                             };
                             callCount += 1;
                         };
